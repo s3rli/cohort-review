@@ -13,12 +13,12 @@ BITBUCKET_USERNAME=<username>   BITBUCKET_APP_PASSWORD=<app password>
 BITBUCKET_EMAIL=<email>         BITBUCKET_API_TOKEN=<Atlassian API token>
 ```
 
-Build once: `go build .`
+Install: `go install github.com/s3rli/cohort-review@latest` — or clone and `go build .`
 
 ## Usage
 
 ```
-./cohort-review https://bitbucket.org/{workspace}/{repo}/pull-requests/{id}
+cohort-review https://bitbucket.org/{workspace}/{repo}/pull-requests/{id}
 ```
 
 Fetches the diff, groups it into cohorts (~10–60s), prints a `http://127.0.0.1:<port>` URL, and opens your browser. Ctrl-C to quit.
