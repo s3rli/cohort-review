@@ -1,0 +1,80 @@
+package main
+
+import (
+	"strings"
+	"testing"
+)
+
+const sampleDiff = `diff --git a/foo.go b/foo.go
+index 111..222 100644
+--- a/foo.go
++++ b/foo.go
+@@ -1,3 +1,4 @@
+ package foo
++// added
+diff --git a/gone.go b/gone.go
+deleted file mode 100644
+index 333..000
+--- a/gone.go
++++ /dev/null
+@@ -1,2 +0,0 @@
+-package gone
+-// bye
+diff --git a/fresh.go b/fresh.go
+new file mode 100644
+index 000..444
+--- /dev/null
++++ b/fresh.go
+@@ -0,0 +1,1 @@
++package fresh
+diff --git a/old.go b/moved.go
+similarity index 90%
+rename from old.go
+rename to moved.go
+index 555..666 100644
+--- a/old.go
++++ b/moved.go
+@@ -1,1 +1,1 @@
+-// old
++// moved
+`
+
+func TestSplitUnifiedDiffLossless(t *testing.T) {
+	segs := SplitUnifiedDiff(sampleDiff)
+	var joined strings.Builder
+	for _, s := range segs {
+		joined.WriteString(s.Raw)
+	}
+	if joined.String() != sampleDiff {
+		t.Fatal("concatenated segments do not reproduce the input")
+	}
+}
+
+func TestSplitUnifiedDiffPaths(t *testing.T) {
+	segs := SplitUnifiedDiff(sampleDiff)
+	want := []string{"foo.go", "gone.go", "fresh.go", "moved.go"}
+	if len(segs) != len(want) {
+		t.Fatalf("got %d segments, want %d", len(segs), len(want))
+	}
+	for i, w := range want {
+		if segs[i].Path != w {
+			t.Errorf("segment %d path = %q, want %q", i, segs[i].Path, w)
+		}
+	}
+}
+
+func TestSplitUnifiedDiffNoGitHeaders(t *testing.T) {
+	diff := "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-a\n+b\n--- a/y.txt\n+++ b/y.txt\n@@ -1 +1 @@\n-c\n+d\n"
+	segs := SplitUnifiedDiff(diff)
+	if len(segs) != 2 || segs[0].Path != "x.txt" || segs[1].Path != "y.txt" {
+		t.Fatalf("got %+v", segs)
+	}
+}
+
+func TestDeriveNameStatus(t *testing.T) {
+	got := deriveNameStatus(SplitUnifiedDiff(sampleDiff))
+	want := "M\tfoo.go\nD\tgone.go\nA\tfresh.go\nR\tmoved.go\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
