@@ -64,11 +64,11 @@ func TestServerEndpoints(t *testing.T) {
 }
 
 // fakeBitbucket serves the two API endpoints load() hits.
-func fakeBitbucket(t *testing.T, title, diff string) *httptest.Server {
+func fakeBitbucket(t *testing.T, title, desc, diff string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /2.0/repositories/{ws}/{repo}/pullrequests/{n}", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `{"title": %q, "links": {"html": {"href": "https://bitbucket.org/x"}}}`, title)
+		fmt.Fprintf(w, `{"title": %q, "description": %q, "links": {"html": {"href": "https://bitbucket.org/x"}}}`, title, desc)
 	})
 	mux.HandleFunc("GET /2.0/repositories/{ws}/{repo}/pullrequests/{n}/diff", func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, diff)
@@ -78,7 +78,7 @@ func fakeBitbucket(t *testing.T, title, diff string) *httptest.Server {
 
 func TestLoadSwitchesPR(t *testing.T) {
 	newDiff := "diff --git a/new.go b/new.go\n--- a/new.go\n+++ b/new.go\n@@ -1 +1 @@\n-a\n+b\n"
-	bb := fakeBitbucket(t, "Second PR", newDiff)
+	bb := fakeBitbucket(t, "Second PR", "", newDiff)
 	defer bb.Close()
 
 	a := &app{
@@ -100,6 +100,30 @@ func TestLoadSwitchesPR(t *testing.T) {
 	}
 	if code, gotDiff := getBody(t, srv, "/diff.txt"); code != 200 || gotDiff != newDiff {
 		t.Errorf("/diff.txt not swapped: %q", gotDiff)
+	}
+}
+
+func TestLoadThreadsPRMetadataIntoPrompt(t *testing.T) {
+	diff := "diff --git a/new.go b/new.go\n--- a/new.go\n+++ b/new.go\n@@ -1 +1 @@\n-a\n+b\n"
+	bb := fakeBitbucket(t, "My PR", "Detailed intent here.", diff)
+	defer bb.Close()
+
+	var gotPrompt string
+	a := &app{
+		client: NewClient("u", "p", bb.URL),
+		group: func(ctx context.Context, prompt string) (string, error) {
+			gotPrompt = prompt
+			return `{"walkthrough": "w", "cohorts": [{"name": "N", "summary": "s", "files": ["new.go"]}]}`, nil
+		},
+		budget: defaultBudget,
+		format: "line-by-line",
+	}
+	if err := a.load(context.Background(), PRRef{Workspace: "ws", Repo: "repo", Number: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gotPrompt, "## PR title and description") ||
+		!strings.Contains(gotPrompt, "My PR") || !strings.Contains(gotPrompt, "Detailed intent here.") {
+		t.Error("PR metadata did not reach the grouping prompt")
 	}
 }
 

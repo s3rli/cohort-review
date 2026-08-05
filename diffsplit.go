@@ -84,10 +84,12 @@ func segmentPath(raw string) string {
 	return oldPath
 }
 
-// deriveNameStatus builds a git-style "status<TAB>path" list from segment
-// headers. The path column is exactly the segment Path (the groupable ground
-// truth) — a rename shows only its new-side path so the model can copy paths
-// verbatim without ambiguity; the rename itself is visible in the hunks.
+// deriveNameStatus builds a "status<TAB>path<TAB>+added/-deleted" list from
+// segment headers and hunks. The path column is exactly the segment Path (the
+// groupable ground truth) — a rename shows only its new-side path so the model
+// can copy paths verbatim without ambiguity; the rename itself is visible in
+// the hunks. The line counts give the model a size signal for files whose
+// hunks are omitted or truncated from the prompt for budget reasons.
 func deriveNameStatus(segs []FileSegment) string {
 	var b strings.Builder
 	for _, s := range segs {
@@ -95,20 +97,34 @@ func deriveNameStatus(segs []FileSegment) string {
 			continue
 		}
 		status := "M"
+		added, deleted := 0, 0
+		inHunk := false
 		for _, line := range strings.Split(s.Raw, "\n") {
 			if strings.HasPrefix(line, "@@ ") {
-				break
+				inHunk = true
+				continue
 			}
+			if !inHunk {
+				switch {
+				case strings.HasPrefix(line, "new file mode"):
+					status = "A"
+				case strings.HasPrefix(line, "deleted file mode"):
+					status = "D"
+				case strings.HasPrefix(line, "rename from "):
+					status = "R"
+				}
+				continue
+			}
+			// The +++/--- guard matters only for diff-of-a-diff content,
+			// where an added line can itself be a file header.
 			switch {
-			case strings.HasPrefix(line, "new file mode"):
-				status = "A"
-			case strings.HasPrefix(line, "deleted file mode"):
-				status = "D"
-			case strings.HasPrefix(line, "rename from "):
-				status = "R"
+			case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
+				added++
+			case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
+				deleted++
 			}
 		}
-		fmt.Fprintf(&b, "%s\t%s\n", status, s.Path)
+		fmt.Fprintf(&b, "%s\t%s\t+%d/-%d\n", status, s.Path, added, deleted)
 	}
 	return b.String()
 }

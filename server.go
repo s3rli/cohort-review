@@ -53,7 +53,7 @@ func (a *app) load(ctx context.Context, ref PRRef) error {
 	}
 	fmt.Fprintf(os.Stderr, "diff: %d files, %d KB\n", len(paths), len(diff)/1024)
 	fmt.Fprintf(os.Stderr, "grouping into cohorts (model %s)…\n", a.model)
-	g := groupCohorts(ctx, a.group, segs, a.budget)
+	g := groupCohorts(ctx, a.group, pr, segs, a.budget)
 	fmt.Fprintf(os.Stderr, "%d cohorts\n", len(g.Cohorts))
 	page, err := renderPage(pr, g, a.format)
 	if err != nil {

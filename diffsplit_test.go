@@ -73,7 +73,7 @@ func TestSplitUnifiedDiffNoGitHeaders(t *testing.T) {
 
 func TestDeriveNameStatus(t *testing.T) {
 	got := deriveNameStatus(SplitUnifiedDiff(sampleDiff))
-	want := "M\tfoo.go\nD\tgone.go\nA\tfresh.go\nR\tmoved.go\n"
+	want := "M\tfoo.go\t+1/-0\nD\tgone.go\t+0/-2\nA\tfresh.go\t+1/-0\nR\tmoved.go\t+1/-1\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

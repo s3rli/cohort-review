@@ -1,8 +1,8 @@
 // Adapted from code-review-agent internal/vcs/bitbucket (manager.go apiRequest
 // + vcs.go FetchPR/decodePR/FetchDiff/requireOK) — keep parity for same-source
 // convergence. Collapsed Manager+BitbucketVCS into one read-only Client; no
-// retry (a local CLI user just reruns); adds Title and the PR web link to the
-// decode, which upstream doesn't extract.
+// retry (a local CLI user just reruns); adds Title, Description, and the PR
+// web link to the decode, which upstream doesn't extract.
 package main
 
 import (
@@ -38,8 +38,9 @@ func NewClient(user, password, baseURL string) *Client {
 }
 
 type PullRequest struct {
-	Title  string
-	WebURL string
+	Title       string
+	Description string // raw markdown, may be empty
+	WebURL      string
 }
 
 func (c *Client) FetchPR(ctx context.Context, ref PRRef) (PullRequest, error) {
@@ -52,8 +53,9 @@ func (c *Client) FetchPR(ctx context.Context, ref PRRef) (PullRequest, error) {
 		return PullRequest{}, err
 	}
 	var pr struct {
-		Title string `json:"title"`
-		Links struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Links       struct {
 			HTML struct {
 				Href string `json:"href"`
 			} `json:"html"`
@@ -62,7 +64,7 @@ func (c *Client) FetchPR(ctx context.Context, ref PRRef) (PullRequest, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
 		return PullRequest{}, fmt.Errorf("decode PR: %w", err)
 	}
-	return PullRequest{Title: pr.Title, WebURL: pr.Links.HTML.Href}, nil
+	return PullRequest{Title: pr.Title, Description: pr.Description, WebURL: pr.Links.HTML.Href}, nil
 }
 
 // FetchDiff returns the source-vs-destination unified diff for a PR.
