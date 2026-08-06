@@ -37,13 +37,23 @@ func runClaude(ctx context.Context, model, prompt string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		tail := stderr.String()
-		if len(tail) > 500 {
-			tail = "…" + tail[len(tail)-500:]
-		}
-		return "", fmt.Errorf("claude: %w: %s", err, tail)
+		return "", claudeFailure(err, stdout.Bytes(), stderr.Bytes())
 	}
 	return extractClaudeResult(stdout.Bytes()), nil
+}
+
+// claudeFailure formats a CLI failure. With --output-format json the CLI
+// reports most errors as a JSON envelope on STDOUT with an empty stderr, so
+// stdout is the fallback detail source — without it failures are blank.
+func claudeFailure(err error, stdout, stderr []byte) error {
+	detail := string(stderr)
+	if strings.TrimSpace(detail) == "" {
+		detail = extractClaudeResult(stdout)
+	}
+	if len(detail) > 500 {
+		detail = "…" + detail[len(detail)-500:]
+	}
+	return fmt.Errorf("claude: %w: %s", err, detail)
 }
 
 // extractClaudeResult unwraps the assistant text from the Claude CLI's
