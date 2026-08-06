@@ -262,10 +262,16 @@ func TestBuildPromptInputTruncationFallsBackToOmitted(t *testing.T) {
 
 func TestSplitRulesInPrompt(t *testing.T) {
 	p := buildCohortPrompt(promptInput{NameStatus: "M\ta.go\t+1/-0\n"}, "nonce")
-	for _, frag := range []string{"path#N", "### hunk", "EXACTLY ONE cohort", "omitted or truncated"} {
+	for _, frag := range []string{"path#N", "### hunk", "EXACTLY ONE cohort", "omitted or truncated",
+		"same cohort as its system under test", "mechanical test churn"} {
 		if !strings.Contains(p, frag) {
-			t.Errorf("prompt missing split-rule fragment %q", frag)
+			t.Errorf("prompt missing rule fragment %q", frag)
 		}
+	}
+	// Tests are the change's specification, not mechanical noise: the
+	// mechanical-changes list must not sweep them into a trailing cohort.
+	if strings.Contains(p, "mechanical changes (tests") {
+		t.Error("tests still listed as mechanical changes")
 	}
 }
 
