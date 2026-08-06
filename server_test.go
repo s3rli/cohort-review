@@ -52,7 +52,8 @@ func TestServerEndpoints(t *testing.T) {
 		t.Errorf("/diff.txt: code %d, byte-equal: %v", code, gotDiff == diff)
 	}
 
-	for _, path := range []string{"/assets/diff2html.min.js", "/assets/diff2html.min.css"} {
+	for _, path := range []string{"/assets/diff2html.min.js", "/assets/diff2html.min.css",
+		"/assets/diff2html-ui.min.js", "/assets/github.min.css", "/assets/github-dark.min.css"} {
 		if code, _ := getBody(t, srv, path); code != 200 {
 			t.Errorf("%s: code %d", path, code)
 		}

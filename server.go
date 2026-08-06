@@ -14,7 +14,7 @@ import (
 	"sync"
 )
 
-//go:embed assets/diff2html.min.js assets/diff2html.min.css
+//go:embed assets/diff2html.min.js assets/diff2html.min.css assets/diff2html-ui.min.js assets/github.min.css assets/github-dark.min.css
 var assetsFS embed.FS
 
 //go:embed page.tmpl

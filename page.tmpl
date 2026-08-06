@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.Title}} — cohort review</title>
 <link rel="stylesheet" href="/assets/diff2html.min.css">
+<link rel="stylesheet" href="/assets/github.min.css" id="hl-light">
+<link rel="stylesheet" href="/assets/github-dark.min.css" id="hl-dark" disabled>
 <script src="/assets/diff2html.min.js"></script>
+<script src="/assets/diff2html-ui.min.js"></script>
 <style>
   /* Adapted from the "Cohort Review (diff2html)" prototype artifact. */
   :root {
@@ -84,6 +87,10 @@
   .coh-sum { font-size: 13.5px; color: var(--ink-2); margin: 0 0 12px 21px; line-height: 1.5; }
   .cohort.collapsed .coh-body { display: none; }
   .d2h-wrap { margin-bottom: 8px; }
+  /* The hljs themes paint a block background on every highlighted element,
+     which fights the diff's added/removed row colors — highlighting must
+     only color tokens. */
+  .d2h-wrap .hljs { background: transparent; padding: 0; }
   .d2h-wrap .d2h-file-wrapper { border-radius: 9px; overflow: hidden; margin-bottom: 12px; scroll-margin-top: 12px; }
 
   .theme-btn { position: fixed; top: 16px; right: 18px; z-index: 5; font-family: var(--mono); font-size: 11px;
@@ -165,9 +172,6 @@
   const esc = s => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   let FMT = PAGE.format;
-  function d2hFor(sub) {
-    return Diff2Html.html(sub, { drawFileList: false, matching: "lines", outputFormat: FMT });
-  }
 
   function build() {
     document.title = PAGE.title + " — cohort review";
@@ -218,8 +222,15 @@
               <span>${parsed.length} files</span><span class="chev">▾</span></span>
           </div>
           <p class="coh-sum">${esc(c.summary)}</p>
-          <div class="coh-body"><div class="d2h-wrap">${d2hFor(sub)}</div></div>
+          <div class="coh-body"><div class="d2h-wrap" id="wrap-${ci}"></div></div>
         </section>`);
+
+      // Diff2HtmlUI (rather than Diff2Html.html) so highlightCode() can run
+      // the bundled highlight.js over the rendered lines.
+      const ui = new Diff2HtmlUI(document.getElementById(`wrap-${ci}`), sub,
+        { drawFileList: false, matching: "lines", outputFormat: FMT, highlight: true });
+      ui.draw();
+      ui.highlightCode();
 
       // Anchor each rendered file card: diff2html emits one .d2h-file-wrapper
       // per non-empty sub, in concatenation order, so pairing by index is
@@ -251,6 +262,8 @@
   function applyDark() {
     const dark = effectiveDark();
     document.querySelectorAll(".d2h-wrapper").forEach(el => el.classList.toggle("d2h-dark-color-scheme", dark));
+    document.getElementById("hl-light").disabled = dark;
+    document.getElementById("hl-dark").disabled = !dark;
   }
   function jump(id) {
     const el = document.getElementById(id);
