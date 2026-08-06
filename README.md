@@ -2,6 +2,10 @@
 
 Local, read-only PR review aid: fetches a Bitbucket PR's diff, groups changed files into named cohorts with one LLM call, and serves an interactive [diff2html](https://diff2html.xyz) page on localhost. Never posts anything back to the PR.
 
+![cohort-review reviewing a demo PR](docs/screenshot.png)
+
+*A fictional demo PR grouped into four cohorts — tests sit with the code they test, and `config.go`'s two hunks are split across the two cohorts they belong to (the `(1/2)` badges).*
+
 ## Setup
 
 Requirements: Go 1.24+, the `claude` CLI in PATH (logged in, or `CLAUDE_CODE_OAUTH_TOKEN` set).
