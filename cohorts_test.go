@@ -20,7 +20,122 @@ func testSegs() []FileSegment {
 	}
 }
 
+// splitSegs has multi-hunk files plus a hunkless binary — the fixture for
+// hunk-level grouping tests. auth: 3 hunks, util: 2 hunks, img.png: 0.
+func splitSegs() []FileSegment {
+	return []FileSegment{
+		seg("core/auth.go", "diff --git a/core/auth.go b/core/auth.go\n@@ -1 +1 @@\n-a1\n+a1x\n@@ -10 +10 @@\n-a2\n+a2x\n@@ -20 +20 @@\n-a3\n+a3x\n"),
+		seg("core/util.go", "diff --git a/core/util.go b/core/util.go\n@@ -1 +1 @@\n-u1\n+u1x\n@@ -9 +9 @@\n-u2\n+u2x\n"),
+		seg("img.png", "diff --git a/img.png b/img.png\nBinary files differ\n"),
+	}
+}
+
+// --- hunk index / ref resolution ---
+
+func TestIndexSegments(t *testing.T) {
+	idx := indexSegments(splitSegs())
+	wantPaths := []string{"core/auth.go", "core/util.go", "img.png"}
+	if len(idx.paths) != len(wantPaths) {
+		t.Fatalf("paths = %v", idx.paths)
+	}
+	for i, p := range wantPaths {
+		if idx.paths[i] != p {
+			t.Errorf("paths[%d] = %q, want %q", i, idx.paths[i], p)
+		}
+	}
+	for p, want := range map[string]int{"core/auth.go": 3, "core/util.go": 2, "img.png": 0} {
+		if idx.hunks[p] != want {
+			t.Errorf("hunks[%s] = %d, want %d", p, idx.hunks[p], want)
+		}
+	}
+
+	// A path appearing in two segments is bare-only and listed once.
+	dup := []FileSegment{
+		seg("x.go", "diff --git a/x.go b/x.go\n@@ -1 +1 @@\n-a\n+b\n"),
+		seg("x.go", "diff --git a/x.go b/x.go\n@@ -5 +5 @@\n-c\n+d\n"),
+	}
+	idx = indexSegments(dup)
+	if len(idx.paths) != 1 || idx.hunks["x.go"] != 0 {
+		t.Errorf("duplicate path: paths=%v hunks=%v", idx.paths, idx.hunks)
+	}
+}
+
+func TestResolveRef(t *testing.T) {
+	idx := indexSegments(splitSegs())
+	valid := map[string]bool{}
+	for _, p := range idx.paths {
+		valid[p] = true
+	}
+	cases := []struct {
+		in   string
+		path string
+		hunk int
+		ok   bool
+	}{
+		{"core/auth.go", "core/auth.go", 0, true},
+		{"core/auth.go#2", "core/auth.go", 2, true},
+		{"core/auth.go#0", "", 0, false},
+		{"core/auth.go#4", "", 0, false},
+		{"img.png#1", "", 0, false},
+		{"core/auth.go#x", "", 0, false},
+		{"made/up.go", "", 0, false},
+		{"`core/util.go#2`", "core/util.go", 2, true},
+		{"b/core/util.go#1", "core/util.go", 1, true},
+		{"core/util.go#2\t+9/-2", "core/util.go", 2, true},
+	}
+	for _, c := range cases {
+		p, n, ok := resolveRef(c.in, idx, valid)
+		if p != c.path || n != c.hunk || ok != c.ok {
+			t.Errorf("resolveRef(%q) = (%q, %d, %v), want (%q, %d, %v)", c.in, p, n, ok, c.path, c.hunk, c.ok)
+		}
+	}
+
+	// A literal '#' filename wins over hunk addressing.
+	lit := indexSegments([]FileSegment{
+		seg("notes", "diff --git a/notes b/notes\n@@ -1 +1 @@\n-a\n+b\n@@ -5 +5 @@\n-c\n+d\n"),
+		seg("notes#2", "diff --git a/notes#2 b/notes#2\n@@ -1 +1 @@\n-e\n+f\n"),
+	})
+	lv := map[string]bool{"notes": true, "notes#2": true}
+	if p, n, ok := resolveRef("notes#2", lit, lv); !ok || p != "notes#2" || n != 0 {
+		t.Errorf("literal # filename: got (%q, %d, %v)", p, n, ok)
+	}
+}
+
+func TestAnnotateSegmentHunks(t *testing.T) {
+	for _, s := range splitSegs() {
+		ann := annotateSegmentHunks(s.Path, s.Raw)
+		var stripped strings.Builder
+		for _, line := range strings.SplitAfter(ann, "\n") {
+			if strings.HasPrefix(line, "### hunk ") {
+				continue
+			}
+			stripped.WriteString(line)
+		}
+		if stripped.String() != s.Raw {
+			t.Errorf("%s: stripping markers does not reproduce raw", s.Path)
+		}
+	}
+
+	ann := annotateSegmentHunks("core/auth.go", splitSegs()[0].Raw)
+	for n := 1; n <= 3; n++ {
+		marker := fmt.Sprintf("### hunk core/auth.go#%d\n@@ ", n)
+		if !strings.Contains(ann, marker) {
+			t.Errorf("marker %d not immediately before its hunk", n)
+		}
+	}
+
+	binary := splitSegs()[2]
+	if annotateSegmentHunks(binary.Path, binary.Raw) != binary.Raw {
+		t.Error("hunkless segment must pass through unchanged")
+	}
+}
+
 // --- budget assembly ---
+
+// annLen is a segment's prompt footprint: its annotated length.
+func annLen(s FileSegment) int {
+	return len(annotateSegmentHunks(s.Path, s.Raw))
+}
 
 func TestBuildPromptInputUnderBudget(t *testing.T) {
 	in := buildPromptInput(testSegs(), defaultBudget)
@@ -30,6 +145,9 @@ func TestBuildPromptInputUnderBudget(t *testing.T) {
 	for _, p := range []string{"core/auth.go", "core/session.go", "docs/README.md"} {
 		if !strings.Contains(in.Hunks, p) {
 			t.Errorf("hunks missing %s", p)
+		}
+		if !strings.Contains(in.Hunks, "### hunk "+p+"#1") {
+			t.Errorf("hunk marker missing for %s", p)
 		}
 		if !strings.Contains(in.NameStatus, "M\t"+p) {
 			t.Errorf("name-status missing %s", p)
@@ -42,7 +160,7 @@ func TestBuildPromptInputGreedySkip(t *testing.T) {
 	// segment must still be skipped whole.
 	giant := seg("vendor/lock.json", "diff --git a/vendor/lock.json b/vendor/lock.json\n@@ -1,200 +1,200 @@\n"+strings.Repeat("+x\n", 200))
 	segs := append([]FileSegment{giant}, testSegs()...)
-	budget := len(testSegs()[0].Raw) + len(testSegs()[1].Raw) + len(testSegs()[2].Raw)
+	budget := annLen(testSegs()[0]) + annLen(testSegs()[1]) + annLen(testSegs()[2])
 	in := buildPromptInput(segs, budget)
 	// The giant first segment is skipped whole; every later small file still fits.
 	if len(in.Omitted) != 1 || in.Omitted[0] != "vendor/lock.json" {
@@ -112,16 +230,24 @@ func TestBuildPromptInputTruncatesLeadingHunks(t *testing.T) {
 	if !strings.Contains(in.Hunks, "core/session.go") {
 		t.Error("later small segment evicted by truncated giant")
 	}
+	// Only the surviving leading hunks are annotated.
+	if !strings.Contains(in.Hunks, "### hunk big.go#1") {
+		t.Error("truncated file's leading hunk not annotated")
+	}
+	if strings.Contains(in.Hunks, "big.go#2") {
+		t.Error("unseen hunk of truncated file must not be annotated")
+	}
 }
 
 func TestBuildPromptInputTruncationFallsBackToOmitted(t *testing.T) {
 	header := "diff --git a/big.go b/big.go\n"
-	hunk1 := "@@ -1 +1 @@\n-first_hunk_old\n+first_hunk_new\n"
-	giant := seg("big.go", header+hunk1+"@@ -10,200 +10,200 @@\n"+strings.Repeat("+pad\n", 200))
+	hunk1 := "@@ -1,50 +1,50 @@\n" + strings.Repeat("+first_hunk\n", 50)
+	giant := seg("big.go", header+hunk1+"@@ -100,200 +100,200 @@\n"+strings.Repeat("+pad\n", 200))
 	segs := append([]FileSegment{giant}, testSegs()...)
-	// Cap too small for even header+first hunk: degrade to omission, as before
-	// truncation existed.
-	budget := 200
+	// The cap (budget/8) is far below header+first hunk: truncation is
+	// impossible and the file degrades to omission, as before truncation
+	// existed. The small files still fit whole.
+	budget := 600
 	in := buildPromptInput(segs, budget)
 	if len(in.Omitted) != 1 || in.Omitted[0] != "big.go" {
 		t.Fatalf("omitted = %v, want [big.go]", in.Omitted)
@@ -131,6 +257,15 @@ func TestBuildPromptInputTruncationFallsBackToOmitted(t *testing.T) {
 	}
 	if strings.Contains(in.Hunks, "first_hunk") {
 		t.Error("omitted segment leaked into hunks")
+	}
+}
+
+func TestSplitRulesInPrompt(t *testing.T) {
+	p := buildCohortPrompt(promptInput{NameStatus: "M\ta.go\t+1/-0\n"}, "nonce")
+	for _, frag := range []string{"path#N", "### hunk", "EXACTLY ONE cohort", "omitted or truncated"} {
+		if !strings.Contains(p, frag) {
+			t.Errorf("prompt missing split-rule fragment %q", frag)
+		}
 	}
 }
 
@@ -215,7 +350,7 @@ func TestRepairHallucinatedDroppedMissedToOther(t *testing.T) {
 	if len(g.Cohorts) != 2 {
 		t.Fatalf("got %+v", g.Cohorts)
 	}
-	if g.Cohorts[0].Files[0] != "core/auth.go" || len(g.Cohorts[0].Files) != 1 {
+	if g.Cohorts[0].Files[0].Path != "core/auth.go" || len(g.Cohorts[0].Files) != 1 {
 		t.Errorf("hallucinated path not dropped: %v", g.Cohorts[0].Files)
 	}
 	last := g.Cohorts[len(g.Cohorts)-1]
@@ -229,11 +364,11 @@ func TestRepairDuplicateKeptFirst(t *testing.T) {
 		{"name": "A", "summary": "s", "files": ["core/auth.go"]},
 		{"name": "B", "summary": "s", "files": ["core/auth.go", "core/session.go", "docs/README.md"]}]}`
 	g := groupCohorts(context.Background(), canned(out), PullRequest{}, testSegs(), defaultBudget)
-	if len(g.Cohorts[0].Files) != 1 || g.Cohorts[0].Files[0] != "core/auth.go" {
+	if len(g.Cohorts[0].Files) != 1 || g.Cohorts[0].Files[0].Path != "core/auth.go" {
 		t.Errorf("cohort A: %v", g.Cohorts[0].Files)
 	}
 	for _, f := range g.Cohorts[1].Files {
-		if f == "core/auth.go" {
+		if f.Path == "core/auth.go" {
 			t.Error("duplicate not removed from later cohort")
 		}
 	}
@@ -258,7 +393,7 @@ func TestRepairPreservesFileOrder(t *testing.T) {
 		t.Fatalf("got %+v", g.Cohorts)
 	}
 	for i, p := range want {
-		if g.Cohorts[0].Files[i] != p {
+		if g.Cohorts[0].Files[i].Path != p {
 			t.Fatalf("file order not preserved: got %v, want %v", g.Cohorts[0].Files, want)
 		}
 	}
@@ -271,6 +406,150 @@ func TestRepairPathTabSuffix(t *testing.T) {
 	g := groupCohorts(context.Background(), canned(out), PullRequest{}, testSegs(), defaultBudget)
 	if len(g.Cohorts) != 1 || len(g.Cohorts[0].Files) != 3 {
 		t.Fatalf("tab-suffixed paths not resolved: %+v", g.Cohorts)
+	}
+}
+
+// --- hunk-level repair ---
+
+// refString flattens a FileRef for compact assertions: "path" or "path#1,3".
+func refString(r FileRef) string {
+	if r.Hunks == nil {
+		return r.Path
+	}
+	parts := make([]string, len(r.Hunks))
+	for i, n := range r.Hunks {
+		parts[i] = fmt.Sprint(n)
+	}
+	return r.Path + "#" + strings.Join(parts, ",")
+}
+
+func cohortRefs(c Cohort) []string {
+	out := make([]string, len(c.Files))
+	for i, r := range c.Files {
+		out[i] = refString(r)
+	}
+	return out
+}
+
+func groupSplit(t *testing.T, out string) Grouping {
+	t.Helper()
+	return groupCohorts(context.Background(), canned(out), PullRequest{}, splitSegs(), defaultBudget)
+}
+
+func assertRefs(t *testing.T, c Cohort, want ...string) {
+	t.Helper()
+	got := cohortRefs(c)
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("cohort %q refs = %v, want %v", c.Name, got, want)
+	}
+}
+
+func TestRepairSplitAcrossCohorts(t *testing.T) {
+	out := `{"cohorts": [
+		{"name": "A", "summary": "s", "files": ["core/auth.go#1", "core/auth.go#3"]},
+		{"name": "B", "summary": "s", "files": ["core/auth.go#2", "core/util.go"]}]}`
+	g := groupSplit(t, out)
+	if len(g.Cohorts) != 3 {
+		t.Fatalf("got %+v", g.Cohorts)
+	}
+	assertRefs(t, g.Cohorts[0], "core/auth.go#1,3")
+	assertRefs(t, g.Cohorts[1], "core/auth.go#2", "core/util.go")
+	assertRefs(t, g.Cohorts[2], "img.png") // unclaimed binary swept to Other
+}
+
+func TestRepairBareClaimsRemainder(t *testing.T) {
+	out := `{"cohorts": [
+		{"name": "A", "summary": "s", "files": ["core/auth.go#2"]},
+		{"name": "B", "summary": "s", "files": ["core/auth.go", "core/util.go", "img.png"]}]}`
+	g := groupSplit(t, out)
+	assertRefs(t, g.Cohorts[1], "core/auth.go#1,3", "core/util.go", "img.png")
+}
+
+func TestRepairFirstWinsAcrossCohorts(t *testing.T) {
+	out := `{"cohorts": [
+		{"name": "A", "summary": "s", "files": ["core/auth.go"]},
+		{"name": "B", "summary": "s", "files": ["core/auth.go#2", "core/util.go", "img.png"]}]}`
+	g := groupSplit(t, out)
+	assertRefs(t, g.Cohorts[0], "core/auth.go")
+	// The already-claimed #2 is silently skipped, like duplicate paths today.
+	assertRefs(t, g.Cohorts[1], "core/util.go", "img.png")
+}
+
+func TestRepairSameCohortMergeSortNormalize(t *testing.T) {
+	out := `{"cohorts": [{"name": "A", "summary": "s",
+		"files": ["core/auth.go#3", "core/util.go#1", "core/auth.go#1", "core/auth.go#2"]}]}`
+	g := groupSplit(t, out)
+	// auth's claims merge at its first position and cover all 3 hunks → bare.
+	assertRefs(t, g.Cohorts[0], "core/auth.go", "core/util.go#1")
+	assertRefs(t, g.Cohorts[len(g.Cohorts)-1], "core/util.go#2", "img.png")
+}
+
+func TestRepairLeftoverHunksToOther(t *testing.T) {
+	out := `{"cohorts": [{"name": "A", "summary": "s", "files": ["core/auth.go#1"]}]}`
+	g := groupSplit(t, out)
+	last := g.Cohorts[len(g.Cohorts)-1]
+	if last.Name != "Other" {
+		t.Fatalf("got %+v", g.Cohorts)
+	}
+	assertRefs(t, last, "core/auth.go#2,3", "core/util.go", "img.png")
+}
+
+func TestRepairInvalidHunkRefDropped(t *testing.T) {
+	out := `{"cohorts": [{"name": "A", "summary": "s",
+		"files": ["core/auth.go#9", "img.png#1", "core/util.go"]}]}`
+	g := groupSplit(t, out)
+	assertRefs(t, g.Cohorts[0], "core/util.go")
+	assertRefs(t, g.Cohorts[len(g.Cohorts)-1], "core/auth.go", "img.png")
+}
+
+// TestRepairHunkPartition pins the core invariant: whatever the model emits,
+// every hunk of every file (and every bare-only file) lands in exactly one
+// cohort's refs, counting Other.
+func TestRepairHunkPartition(t *testing.T) {
+	outputs := []string{
+		`{"cohorts": [{"name": "A", "summary": "s", "files": ["core/auth.go#1", "core/auth.go#3"]},
+			{"name": "B", "summary": "s", "files": ["core/auth.go#2", "core/util.go"]}]}`,
+		`{"cohorts": [{"name": "A", "summary": "s", "files": ["core/auth.go#2", "core/auth.go#2", "core/auth.go"]}]}`,
+		`{"cohorts": [{"name": "A", "summary": "s", "files": ["core/util.go", "core/util.go#1", "junk.go", "img.png#3"]}]}`,
+		`{"cohorts": [{"name": "A", "summary": "s", "files": ["img.png", "img.png"]},
+			{"name": "B", "summary": "s", "files": ["core/auth.go#3"]}]}`,
+		`{"cohorts": []}`,
+	}
+	idx := indexSegments(splitSegs())
+	for _, out := range outputs {
+		g := groupSplit(t, out)
+		counts := map[string]int{} // "path#n" or bare-only "path" → times claimed
+		for _, c := range g.Cohorts {
+			for _, r := range c.Files {
+				m := idx.hunks[r.Path]
+				switch {
+				case m == 0:
+					counts[r.Path]++
+				case r.Hunks == nil:
+					for n := 1; n <= m; n++ {
+						counts[fmt.Sprintf("%s#%d", r.Path, n)]++
+					}
+				default:
+					for _, n := range r.Hunks {
+						counts[fmt.Sprintf("%s#%d", r.Path, n)]++
+					}
+				}
+			}
+		}
+		for _, p := range idx.paths {
+			m := idx.hunks[p]
+			if m == 0 {
+				if counts[p] != 1 {
+					t.Errorf("output %.40q: bare-only %s claimed %d times", out, p, counts[p])
+				}
+				continue
+			}
+			for n := 1; n <= m; n++ {
+				if k := fmt.Sprintf("%s#%d", p, n); counts[k] != 1 {
+					t.Errorf("output %.40q: %s claimed %d times", out, k, counts[k])
+				}
+			}
+		}
 	}
 }
 

@@ -36,6 +36,7 @@ In the page: sidebar navigates cohorts, cohort headers collapse, toggle line-by-
 ## Notes
 
 - Grouping never blocks the page: if the LLM call fails or returns garbage (retried once), everything renders under a single "All changes" cohort.
+- A mixed-concern file can be split across cohorts by hunk — the sidebar shows a `(k/M)` hunk count and the full diff still renders exactly once.
 - Diffs over the budget still group **all** files — overflow files' hunks are trimmed to their leading hunks (or omitted entirely) in the model input; the rendered page always shows the full diff.
 - Server binds 127.0.0.1 only.
 - Small pieces are copied from the internal `code-review-agent` repo (marked with provenance headers) pending same-source convergence.

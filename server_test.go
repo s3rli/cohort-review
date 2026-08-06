@@ -15,7 +15,7 @@ import (
 func testGrouping() Grouping {
 	return Grouping{
 		Walkthrough: "Does things.",
-		Cohorts:     []Cohort{{Name: "Core", Summary: "the core", Files: []string{"a.go"}}},
+		Cohorts:     []Cohort{{Name: "Core", Summary: "the core", Files: []FileRef{{Path: "a.go"}}}},
 	}
 }
 
@@ -173,7 +173,7 @@ func TestRenderPageDataRoundTrips(t *testing.T) {
 	if err := json.Unmarshal(m[1], &got); err != nil {
 		t.Fatalf("PAGE is not valid JSON: %v", err)
 	}
-	if got.Title != "T" || got.Format != "side-by-side" || len(got.Cohorts) != 1 || got.Cohorts[0].Files[0] != "a.go" {
+	if got.Title != "T" || got.Format != "side-by-side" || len(got.Cohorts) != 1 || got.Cohorts[0].Files[0].Path != "a.go" {
 		t.Errorf("round-trip mismatch: %+v", got)
 	}
 }

@@ -128,8 +128,38 @@
   const PALETTE = ["#4b5bd0", "#1a7f37", "#b0851a", "#8a5cd0", "#c04a72", "#2a8fa0", "#6a7a3f", "#4a7ac0"];
   const COHORTS = PAGE.cohorts.map((c, i) => ({ ...c, color: PALETTE[i % PALETTE.length] }));
 
-  let blockByPath = {};
-  const subDiffFor = files => files.map(f => blockByPath[f]).filter(Boolean).join("");
+  // fileBlocks: path → {block, parts}. parts mirrors Go's splitSegmentHunks:
+  // parts[0] is the file header, hunk N is parts[N]. parts = null marks the
+  // path unsplittable — hunk refs then render the whole block instead.
+  let fileBlocks = {};
+
+  // Paths whose whole block was already emitted this build: an unsplittable
+  // path referenced from several cohorts renders at its FIRST ref only, so the
+  // full diff stays on the page exactly once. Reset by every build().
+  let renderedWhole = {};
+
+  // markUnsplittable runs once, BEFORE any rendering: an out-of-range hunk
+  // index means our split disagrees with the server's ground truth, so the
+  // whole path degrades to unsplittable. Deciding upfront (not lazily inside
+  // subFor) is what keeps the diff exactly-once — a lazy downgrade after an
+  // earlier ref already rendered a subset would re-render those hunks.
+  function markUnsplittable() {
+    COHORTS.forEach(c => c.files.forEach(p => {
+      const fb = fileBlocks[p.path];
+      if (p.hunks && fb && fb.parts && p.hunks.some(n => n < 1 || n >= fb.parts.length)) fb.parts = null;
+    }));
+  }
+
+  // subFor renders one cohort entry: a validated hunk subset, or the whole
+  // block exactly once (at the path's first whole/unsplittable ref).
+  function subFor(ref) {
+    const fb = fileBlocks[ref.path];
+    if (!fb) return "";
+    if (ref.hunks && fb.parts) return fb.parts[0] + ref.hunks.map(n => fb.parts[n]).join("");
+    if (renderedWhole[ref.path]) return "";
+    renderedWhole[ref.path] = true;
+    return fb.block;
+  }
   const esc = s => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   let FMT = PAGE.format;
@@ -152,20 +182,30 @@
     const nav = document.getElementById("nav");
     const sections = document.getElementById("sections");
     nav.innerHTML = ""; sections.innerHTML = "";
-    let tAdd = 0, tDel = 0, nFiles = 0;
+    renderedWhole = {};
+    let tAdd = 0, tDel = 0;
+    const nFiles = new Set(COHORTS.flatMap(c => c.files.map(f => f.path))).size;
 
     COHORTS.forEach((c, ci) => {
-      const sub = subDiffFor(c.files);
+      const subs = c.files.map(subFor);
+      const sub = subs.join("");
       const parsed = Diff2Html.parse(sub);
       const cAdd = parsed.reduce((s, f) => s + (f.addedLines || 0), 0);
       const cDel = parsed.reduce((s, f) => s + (f.deletedLines || 0), 0);
-      tAdd += cAdd; tDel += cDel; nFiles += parsed.length;
+      tAdd += cAdd; tDel += cDel;
 
+      // Partial refs get a "k/M hunks" suffix; computed after subFor so an
+      // unsplittable downgrade this build is reflected.
+      const label = p => {
+        const fb = fileBlocks[p.path];
+        const m = p.hunks && fb && fb.parts ? ` (${p.hunks.length}/${fb.parts.length - 1})` : "";
+        return esc(p.path) + m;
+      };
       nav.insertAdjacentHTML("beforeend",
         `<div class="nav-coh"><div class="nch" onclick="jump('coh-${ci}')">
           <span class="swatch" style="background:${c.color}"></span>${esc(c.name)}
           <span class="cnt">${c.files.length}</span></div>
-          <ul class="nav-files">${c.files.map((p, fi) => `<li onclick="jumpFile(${ci}, ${fi})" title="${esc(p)}"><span>${esc(p)}</span></li>`).join("")}</ul></div>`);
+          <ul class="nav-files">${c.files.map((p, fi) => `<li onclick="jumpFile(${ci}, ${fi})" title="${esc(p.path)}"><span>${label(p)}</span></li>`).join("")}</ul></div>`);
 
       sections.insertAdjacentHTML("beforeend",
         `<section class="cohort" id="coh-${ci}">
@@ -181,9 +221,9 @@
         </section>`);
 
       // Anchor each rendered file card: diff2html emits one .d2h-file-wrapper
-      // per file, in the order subDiffFor concatenated them (the cohort's
-      // files that have a diff block), so pairing by index is exact.
-      const present = c.files.map((p, fi) => fi).filter(fi => blockByPath[c.files[fi]]);
+      // per non-empty sub, in concatenation order, so pairing by index is
+      // exact.
+      const present = c.files.map((p, fi) => fi).filter(fi => subs[fi]);
       document.getElementById(`coh-${ci}`).querySelectorAll(".d2h-file-wrapper").forEach((el, i) => {
         if (present[i] !== undefined) el.id = `f-${ci}-${present[i]}`;
       });
@@ -233,10 +273,17 @@
   fetch("/diff.txt").then(r => r.text()).then(rawDiff => {
     // Index per-file blocks by the path SplitUnifiedDiff would assign (b/ side,
     // falling back to a/ for deletions) so cohort file lists match exactly.
+    // A path seen in two segments is appended and marked unsplittable — its
+    // concatenated block can't be hunk-indexed, matching the server's
+    // bare-only rule for duplicate paths.
     rawDiff.split(/(?=^diff --git )/m).forEach(b => {
       const m = b.match(/^\+\+\+ b\/(.+)$/m) || b.match(/^--- a\/(.+)$/m);
-      if (m) blockByPath[m[1]] = b;
+      if (!m) return;
+      const fb = fileBlocks[m[1]];
+      if (fb) { fb.block += b; fb.parts = null; return; }
+      fileBlocks[m[1]] = { block: b, parts: b.split(/(?=^@@ )/m) };
     });
+    markUnsplittable();
     build();
   }).catch(e => {
     document.getElementById("sections").innerHTML = `<div class="loading">failed to load diff: ${esc(String(e))}</div>`;

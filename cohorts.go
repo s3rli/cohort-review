@@ -14,6 +14,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -24,15 +26,63 @@ const defaultBudget = 200 * 1024
 // text must not dwarf the diff budget.
 const maxDescription = 16 * 1024
 
+// FileRef is a page-facing, repaired cohort entry: a whole file (Hunks nil) or
+// a validated subset of its hunks (sorted, unique, 1-based).
+type FileRef struct {
+	Path  string `json:"path"`
+	Hunks []int  `json:"hunks,omitempty"`
+}
+
 type Cohort struct {
-	Name    string   `json:"name"`
-	Summary string   `json:"summary"`
-	Files   []string `json:"files"`
+	Name    string    `json:"name"`
+	Summary string    `json:"summary"`
+	Files   []FileRef `json:"files"`
 }
 
 type Grouping struct {
 	Walkthrough string   `json:"walkthrough"`
 	Cohorts     []Cohort `json:"cohorts"`
+}
+
+// modelCohort/modelGrouping are the shapes the LLM emits: files entries are
+// strings — bare paths or "path#N" hunk refs — validated and normalized into
+// FileRefs by repairGrouping, the single tolerant-parse locus (the page never
+// sees the microformat).
+type modelCohort struct {
+	Name    string   `json:"name"`
+	Summary string   `json:"summary"`
+	Files   []string `json:"files"`
+}
+
+type modelGrouping struct {
+	Walkthrough string        `json:"walkthrough"`
+	Cohorts     []modelCohort `json:"cohorts"`
+}
+
+// diffIndex is the hunk-level ground truth: changed paths in diff order and
+// each path's hunk count. Count 0 means bare-only — hunkless segments (binary,
+// mode-only) and paths appearing in more than one segment, which can't be
+// hunk-addressed unambiguously.
+type diffIndex struct {
+	paths []string
+	hunks map[string]int
+}
+
+func indexSegments(segs []FileSegment) diffIndex {
+	idx := diffIndex{hunks: make(map[string]int, len(segs))}
+	for _, s := range segs {
+		if s.Path == "" {
+			continue
+		}
+		if _, dup := idx.hunks[s.Path]; dup {
+			idx.hunks[s.Path] = 0
+			continue
+		}
+		_, hunks := splitSegmentHunks(s.Raw)
+		idx.hunks[s.Path] = len(hunks)
+		idx.paths = append(idx.paths, s.Path)
+	}
+	return idx
 }
 
 type promptInput struct {
@@ -64,22 +114,47 @@ func buildPromptInput(segs []FileSegment, budget int) promptInput {
 		if s.Path == "" {
 			continue
 		}
-		if used+len(s.Raw) <= budget {
-			hunks.WriteString(s.Raw)
-			used += len(s.Raw)
+		ann := annotateSegmentHunks(s.Path, s.Raw)
+		if used+len(ann) <= budget {
+			hunks.WriteString(ann)
+			used += len(ann)
 			continue
 		}
+		// trimSegment allowance checks raw bytes while used counts annotated
+		// bytes — the cap is a heuristic and may overshoot by the marker
+		// lines; the budget itself stays truthful.
 		trimmed := trimSegment(s.Raw, min(perFileCap, budget-used))
 		if trimmed == "" {
 			in.Omitted = append(in.Omitted, s.Path)
 			continue
 		}
-		hunks.WriteString(trimmed)
-		used += len(trimmed)
+		ta := annotateSegmentHunks(s.Path, trimmed)
+		hunks.WriteString(ta)
+		used += len(ta)
 		in.Truncated = append(in.Truncated, s.Path)
 	}
 	in.Hunks = hunks.String()
 	return in
+}
+
+// annotateSegmentHunks prefixes each hunk with a column-0 "### hunk path#N"
+// marker line so the model can address individual hunks. Diff body lines
+// always carry a +/-/space/\ prefix, so a column-0 marker inside the fence is
+// always tool-generated. NEVER feed annotated text back through
+// splitSegmentHunks or trimSegment — the marker precedes its "@@ " line and
+// would glue onto the previous chunk; always trim raw first, then annotate.
+func annotateSegmentHunks(path, raw string) string {
+	header, hunks := splitSegmentHunks(raw)
+	if len(hunks) == 0 {
+		return raw
+	}
+	var b strings.Builder
+	b.WriteString(header)
+	for i, h := range hunks {
+		fmt.Fprintf(&b, "### hunk %s#%d\n", path, i+1)
+		b.WriteString(h)
+	}
+	return b.String()
 }
 
 // splitSegmentHunks splits a file segment's Raw into its header (everything
@@ -134,8 +209,10 @@ func buildCohortPrompt(in promptInput, nonce string) string {
 	b.WriteString(`{"walkthrough": "...", "cohorts": [{"name": "...", "summary": "...", "files": ["path", ...]}]}` + "\n\n")
 	b.WriteString("Rules:\n")
 	b.WriteString("- \"walkthrough\": one short paragraph, plain text (no markdown), describing what the PR does overall.\n")
-	b.WriteString("- \"cohorts\": group EVERY file from the changed-files list into named cohorts (a cohort is a group of related files). Every file appears in EXACTLY ONE cohort.\n")
+	b.WriteString("- \"cohorts\": group EVERY file from the changed-files list into named cohorts (a cohort is a group of related changes). Every hunk of every file must land in EXACTLY ONE cohort; a whole file in one cohort is the normal case.\n")
 	b.WriteString("- \"files\" entries must be paths copied VERBATIM from the changed-files list — the path column ONLY, never the status letter or the +N/-M counts. Never invent, abbreviate, or merge paths.\n")
+	b.WriteString("- A \"files\" entry may instead be \"path#N\" to claim a single hunk, where N comes from the \"### hunk path#N\" marker lines in the diff content. A bare path claims the file's remaining hunks. Split a file across cohorts ONLY when its hunks clearly serve different concerns — prefer whole files — and if you split a file, account for every one of its hunks.\n")
+	b.WriteString("- NEVER use \"path#N\" for files whose hunks are omitted or truncated (see any NOTE below): you have not seen their full change, so reference them by bare path only.\n")
 	b.WriteString("- \"name\": a short title (2-5 words). \"summary\": one line on what that cohort's changes are for.\n")
 	b.WriteString("- Use the diff hunks to split unrelated concerns: two files may belong together even if their paths differ, and path-similar files may belong apart, based on what the hunks actually change.\n")
 	b.WriteString("- Use the PR title and description (when present) as context for the walkthrough and cohort names, but ground everything in the diff — the description may be stale, partial, or wrong.\n")
@@ -180,16 +257,16 @@ type groupFunc func(ctx context.Context, prompt string) (string, error)
 // never fails: any unrecoverable LLM outcome degrades to a single-cohort
 // fallback so the page always renders.
 func groupCohorts(ctx context.Context, run groupFunc, pr PullRequest, segs []FileSegment, budget int) Grouping {
-	paths := segmentPaths(segs)
+	idx := indexSegments(segs)
 	in := buildPromptInput(segs, budget)
 	in.Title, in.Description = pr.Title, pr.Description
 	prompt := buildCohortPrompt(in, NewNonce())
 	for attempt := 1; attempt <= 2; attempt++ {
 		out, err := run(ctx, prompt)
 		if err == nil {
-			g, perr := parseGrouping(out)
+			mg, perr := parseGrouping(out)
 			if perr == nil {
-				if g = repairGrouping(g, paths); len(g.Cohorts) > 0 {
+				if g := repairGrouping(mg, idx); len(g.Cohorts) > 0 {
 					return g
 				}
 				err = fmt.Errorf("no usable cohorts in model output")
@@ -203,8 +280,16 @@ func groupCohorts(ctx context.Context, run groupFunc, pr PullRequest, segs []Fil
 	return Grouping{Cohorts: []Cohort{{
 		Name:    "All changes",
 		Summary: "Automatic grouping unavailable — showing all files.",
-		Files:   paths,
+		Files:   bareRefs(idx.paths),
 	}}}
+}
+
+func bareRefs(paths []string) []FileRef {
+	refs := make([]FileRef, len(paths))
+	for i, p := range paths {
+		refs[i] = FileRef{Path: p}
+	}
+	return refs
 }
 
 func segmentPaths(segs []FileSegment) []string {
@@ -236,57 +321,124 @@ func stripWrappingCodeFence(text string) string {
 	return strings.TrimSpace(inner)
 }
 
-func parseGrouping(out string) (Grouping, error) {
+func parseGrouping(out string) (modelGrouping, error) {
 	s := stripWrappingCodeFence(strings.TrimSpace(out))
-	var g Grouping
+	var g modelGrouping
 	if err := json.Unmarshal([]byte(s), &g); err != nil {
 		// Prose-wrapped JSON: slice from first { to last } and try once more.
 		i, j := strings.Index(s, "{"), strings.LastIndex(s, "}")
 		if i < 0 || j <= i {
-			return Grouping{}, err
+			return modelGrouping{}, err
 		}
 		if err2 := json.Unmarshal([]byte(s[i:j+1]), &g); err2 != nil {
-			return Grouping{}, err2
+			return modelGrouping{}, err2
 		}
 	}
 	return g, nil
 }
 
-// repairGrouping makes the model output structurally valid against the ground
-// truth: hallucinated paths dropped, duplicates kept in their first cohort,
-// uncovered paths gathered into a trailing "Other" cohort, empty cohorts
-// pruned. Every ground-truth path lands in exactly one cohort by construction.
-func repairGrouping(g Grouping, paths []string) Grouping {
-	valid := make(map[string]bool, len(paths))
-	for _, p := range paths {
+// repairGrouping validates and normalizes the model output against the
+// hunk-level ground truth: every hunk of every changed file (and every
+// bare-only file) lands in exactly one cohort by construction. Walking
+// cohorts and entries in order, "path#N" claims one hunk and a bare path
+// claims all still-unclaimed hunks; the first claim wins (mirroring the old
+// duplicate-path rule), invalid refs are dropped with a log, a path's claims
+// merge into one FileRef at its first occurrence per cohort (full coverage
+// normalizes to a whole-file ref), leftovers sweep into a trailing "Other",
+// and empty cohorts are pruned.
+func repairGrouping(g modelGrouping, idx diffIndex) Grouping {
+	valid := make(map[string]bool, len(idx.paths))
+	for _, p := range idx.paths {
 		valid[p] = true
 	}
-	seen := make(map[string]bool, len(paths))
-	kept := make([]Cohort, 0, len(g.Cohorts)+1)
-	for _, c := range g.Cohorts {
-		var files []string
-		for _, f := range c.Files {
-			p, ok := resolvePath(f, valid)
-			if !ok {
-				fmt.Fprintf(os.Stderr, "cohort-review: dropped hallucinated path: %s\n", f)
-				continue
-			}
-			if seen[p] {
-				continue
-			}
-			seen[p] = true
-			files = append(files, p)
+	// claimed[path]: hunk numbers 1..M; bare-only paths use the slot 0.
+	claimed := make(map[string]map[int]bool)
+	claim := func(p string, n int) bool {
+		s := claimed[p]
+		if s == nil {
+			s = make(map[int]bool)
+			claimed[p] = s
 		}
-		if len(files) == 0 {
+		if s[n] {
+			return false
+		}
+		s[n] = true
+		return true
+	}
+	kept := make([]Cohort, 0, len(g.Cohorts)+1)
+	for _, mc := range g.Cohorts {
+		var refs []FileRef
+		pos := make(map[string]int)
+		add := func(p string, ns ...int) {
+			i, ok := pos[p]
+			if !ok {
+				i = len(refs)
+				pos[p] = i
+				refs = append(refs, FileRef{Path: p})
+			}
+			refs[i].Hunks = append(refs[i].Hunks, ns...)
+		}
+		for _, f := range mc.Files {
+			p, n, ok := resolveRef(f, idx, valid)
+			if !ok {
+				fmt.Fprintf(os.Stderr, "cohort-review: dropped unresolvable file ref: %s\n", f)
+				continue
+			}
+			m := idx.hunks[p]
+			switch {
+			case n > 0:
+				if claim(p, n) {
+					add(p, n)
+				}
+			case m == 0:
+				if claim(p, 0) {
+					add(p)
+				}
+			default:
+				var got []int
+				for k := 1; k <= m; k++ {
+					if claim(p, k) {
+						got = append(got, k)
+					}
+				}
+				if len(got) > 0 {
+					add(p, got...)
+				}
+			}
+		}
+		for i := range refs {
+			if refs[i].Hunks == nil {
+				continue
+			}
+			sort.Ints(refs[i].Hunks)
+			if len(refs[i].Hunks) == idx.hunks[refs[i].Path] {
+				refs[i].Hunks = nil
+			}
+		}
+		if len(refs) == 0 {
 			continue
 		}
-		c.Files = files
-		kept = append(kept, c)
+		kept = append(kept, Cohort{Name: mc.Name, Summary: mc.Summary, Files: refs})
 	}
-	var missed []string
-	for _, p := range paths {
-		if !seen[p] {
-			missed = append(missed, p)
+	var missed []FileRef
+	for _, p := range idx.paths {
+		m := idx.hunks[p]
+		if m == 0 {
+			if !claimed[p][0] {
+				missed = append(missed, FileRef{Path: p})
+			}
+			continue
+		}
+		var left []int
+		for k := 1; k <= m; k++ {
+			if !claimed[p][k] {
+				left = append(left, k)
+			}
+		}
+		if len(left) == m {
+			missed = append(missed, FileRef{Path: p})
+		} else if len(left) > 0 {
+			missed = append(missed, FileRef{Path: p, Hunks: left})
 		}
 	}
 	if len(missed) > 0 {
@@ -296,20 +448,17 @@ func repairGrouping(g Grouping, paths []string) Grouping {
 			Files:   missed,
 		})
 	}
-	g.Cohorts = kept
-	return g
+	return Grouping{Walkthrough: g.Walkthrough, Cohorts: kept}
 }
 
-// resolvePath matches a model-emitted path against the ground truth, tolerating
-// whitespace, backticks, a ./, a/, or b/ prefix, and extra tab-separated
-// columns echoed from the changed-files list (status letter, +N/-M counts).
-// Exact match wins first so real paths that start with those prefixes are
-// never mangled.
-func resolvePath(f string, valid map[string]bool) (string, bool) {
-	if valid[f] {
-		return f, true
+// normalizePath matches one candidate string against the ground truth,
+// tolerating whitespace, backticks, and a ./, a/, or b/ prefix. Exact match
+// wins first so real paths that start with those prefixes are never mangled.
+func normalizePath(c string, valid map[string]bool) (string, bool) {
+	if valid[c] {
+		return c, true
 	}
-	p := strings.Trim(strings.TrimSpace(f), "`")
+	p := strings.Trim(strings.TrimSpace(c), "`")
 	if valid[p] {
 		return p, true
 	}
@@ -318,12 +467,37 @@ func resolvePath(f string, valid map[string]bool) (string, bool) {
 			return q, true
 		}
 	}
-	if strings.Contains(p, "\t") {
-		for _, part := range strings.Split(p, "\t") {
-			if valid[part] {
-				return part, true
-			}
+	return "", false
+}
+
+// resolveRef parses one model-emitted files entry: a bare path (hunk == 0) or
+// a "path#N" hunk ref. Candidates are the full entry plus its tab-separated
+// fields (tolerating echoed changed-files columns), and every candidate is
+// tried bare BEFORE any '#' splitting so a literal '#' filename always wins
+// over hunk addressing.
+func resolveRef(f string, idx diffIndex, valid map[string]bool) (string, int, bool) {
+	candidates := []string{f}
+	if strings.Contains(f, "\t") {
+		candidates = append(candidates, strings.Split(f, "\t")...)
+	}
+	for _, c := range candidates {
+		if p, ok := normalizePath(c, valid); ok {
+			return p, 0, true
 		}
 	}
-	return "", false
+	for _, c := range candidates {
+		c = strings.Trim(strings.TrimSpace(c), "`")
+		i := strings.LastIndex(c, "#")
+		if i < 0 {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(c[i+1:]))
+		if err != nil || n < 1 {
+			continue
+		}
+		if p, ok := normalizePath(c[:i], valid); ok && n <= idx.hunks[p] {
+			return p, n, true
+		}
+	}
+	return "", 0, false
 }
