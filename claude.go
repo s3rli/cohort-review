@@ -19,17 +19,19 @@ const claudeTimeout = 3 * time.Minute
 func runClaude(ctx context.Context, model, prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, claudeTimeout)
 	defer cancel()
-	// --tools "" removes every tool from the request: the grouping call is a
-	// single text-only turn, the model cannot burn its turn on a tool call
-	// (newer models did exactly that against the old --disallowedTools
-	// denylist, dying with error_max_turns), and with no tools there is
-	// nothing to prompt for so --dangerously-skip-permissions is unnecessary.
-	// --max-turns 2 is a backstop in case the CLI ever counts an internal
-	// step as a turn; with no tools a second turn is normally unreachable.
+	// --effort medium curbs the model's thinking: at the CLI's default effort,
+	// large prompts can think so long that the server pauses the turn
+	// repeatedly and the run dies with error_max_turns (observed on a 214KB
+	// prompt: two ~100s failed runs at default effort vs one 21s single-turn
+	// success at medium). --max-turns 8 leaves headroom for an occasional
+	// pause anyway. --tools "" removes every tool from the request, so a turn
+	// can never be burned on a tool call and, with nothing to prompt for,
+	// --dangerously-skip-permissions is unnecessary.
 	cmd := exec.CommandContext(ctx, "claude",
 		"-p",
 		"--model", model,
-		"--max-turns", "2",
+		"--effort", "medium",
+		"--max-turns", "8",
 		"--tools", "",
 		"--output-format", "json",
 	)
