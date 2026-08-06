@@ -16,19 +16,21 @@ import (
 // claudeTimeout mirrors code-review-agent's walkthroughTimeout.
 const claudeTimeout = 3 * time.Minute
 
-// All tools are disallowed: the grouping call is a single text-only turn, which
-// is also why --dangerously-skip-permissions is unnecessary — with no tools
-// available there is nothing to prompt for.
-const claudeDisallowedTools = "Bash,Read,Write,Edit,WebFetch,WebSearch,Grep,Glob,Task,NotebookEdit,TodoWrite"
-
 func runClaude(ctx context.Context, model, prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, claudeTimeout)
 	defer cancel()
+	// --tools "" removes every tool from the request: the grouping call is a
+	// single text-only turn, the model cannot burn its turn on a tool call
+	// (newer models did exactly that against the old --disallowedTools
+	// denylist, dying with error_max_turns), and with no tools there is
+	// nothing to prompt for so --dangerously-skip-permissions is unnecessary.
+	// --max-turns 2 is a backstop in case the CLI ever counts an internal
+	// step as a turn; with no tools a second turn is normally unreachable.
 	cmd := exec.CommandContext(ctx, "claude",
 		"-p",
 		"--model", model,
-		"--max-turns", "1",
-		"--disallowedTools", claudeDisallowedTools,
+		"--max-turns", "2",
+		"--tools", "",
 		"--output-format", "json",
 	)
 	// Prompt on stdin, never argv: a large diff would exceed the OS
