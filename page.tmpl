@@ -91,7 +91,24 @@
      which fights the diff's added/removed row colors — highlighting must
      only color tokens. */
   .d2h-wrap .hljs { background: transparent; padding: 0; }
-  .d2h-wrap .d2h-file-wrapper { border-radius: 9px; overflow: hidden; margin-bottom: 12px; scroll-margin-top: 12px; }
+  /* content-visibility lets the browser skip layout/paint for file cards that
+     are scrolled off-screen — cheap virtualization for a long diff. The
+     intrinsic-size is a rough placeholder so the scrollbar stays sane. */
+  .d2h-wrap .d2h-file-wrapper { border-radius: 9px; overflow: hidden; margin-bottom: 12px; scroll-margin-top: 12px;
+    content-visibility: auto; contain-intrinsic-size: 0 320px; }
+  /* Large/generated files (lockfiles, minified assets, huge hunks) render as a
+     placeholder card so one blob can't blow up the page; the expensive
+     diff2html draw + highlight runs only if the user expands it. */
+  .cr-file { scroll-margin-top: 12px; }
+  .cr-big { background: var(--panel); border: 1px solid var(--border); border-radius: 9px; overflow: hidden;
+    margin-bottom: 12px; }
+  .cr-big .cr-name { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--ink-2);
+    padding: 9px 14px; }
+  .cr-show { display: block; width: 100%; text-align: left; cursor: pointer; font-family: var(--mono);
+    font-size: 12px; color: var(--accent); background: var(--panel); border: 0;
+    border-top: 1px solid var(--border); padding: 9px 14px; }
+  .cr-show:hover { background: var(--accent-soft); }
+  .coh-pending { color: var(--muted); font-family: var(--mono); font-size: 12px; padding: 16px 4px; }
 
   .theme-btn { position: fixed; top: 16px; right: 18px; z-index: 5; font-family: var(--mono); font-size: 11px;
     background: var(--panel); color: var(--ink-2); border: 1px solid var(--border); border-radius: 20px;
@@ -172,6 +189,8 @@
   const esc = s => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   let FMT = PAGE.format;
+  let io = null;              // IntersectionObserver driving lazy cohort render
+  const cohortState = [];     // per-cohort: { sub, parsed, present, rendered }
 
   function build() {
     document.title = PAGE.title + " — cohort review";
@@ -188,19 +207,29 @@
     const sections = document.getElementById("sections");
     nav.innerHTML = ""; sections.innerHTML = "";
     renderedWhole = {};
+    if (io) io.disconnect();
+    cohortState.length = 0;
     let tAdd = 0, tDel = 0;
     const nFiles = new Set(COHORTS.flatMap(c => c.files.map(f => f.path))).size;
 
     COHORTS.forEach((c, ci) => {
       const subs = c.files.map(subFor);
-      const sub = subs.join("");
-      const parsed = Diff2Html.parse(sub);
+      // Parsed per sub so renderCohort can spot large files BEFORE the
+      // expensive diff2html draw + highlight pass touches them.
+      const parsedSubs = subs.map(s => s ? Diff2Html.parse(s) : []);
+      const parsed = parsedSubs.flat();
       const cAdd = parsed.reduce((s, f) => s + (f.addedLines || 0), 0);
       const cDel = parsed.reduce((s, f) => s + (f.deletedLines || 0), 0);
       tAdd += cAdd; tDel += cDel;
 
-      // Partial refs get a "k/M hunks" suffix; computed after subFor so an
-      // unsplittable downgrade this build is reflected.
+      // present: cohort file indices with a non-empty sub this build (computed
+      // after subFor so an unsplittable downgrade is reflected). Each gets its
+      // own host card in renderCohort, which is what the f-ci-fi anchors and
+      // jumpFile rely on.
+      const present = c.files.map((p, fi) => fi).filter(fi => subs[fi]);
+      cohortState[ci] = { subs, parsedSubs, present, rendered: false };
+
+      // Partial refs get a "k/M hunks" suffix.
       const label = p => {
         const fb = fileBlocks[p.path];
         const m = p.hunks && fb && fb.parts ? ` (${p.hunks.length}/${fb.parts.length - 1})` : "";
@@ -212,8 +241,11 @@
           <span class="cnt">${c.files.length}</span></div>
           <ul class="nav-files">${c.files.map((p, fi) => `<li onclick="jumpFile(${ci}, ${fi})" title="${esc(p.path)}"><span>${label(p)}</span></li>`).join("")}</ul></div>`);
 
+      // Only the section shell (header, stats, empty wrap) is built here. The
+      // diff itself is drawn lazily by renderCohort when the cohort nears the
+      // viewport — see the IntersectionObserver below.
       sections.insertAdjacentHTML("beforeend",
-        `<section class="cohort" id="coh-${ci}">
+        `<section class="cohort" id="coh-${ci}" data-ci="${ci}">
           <div class="coh-head" onclick="this.parentNode.classList.toggle('collapsed')">
             <span class="swatch" style="background:${c.color}"></span>
             <h2>${esc(c.name)}</h2>
@@ -222,29 +254,84 @@
               <span>${parsed.length} files</span><span class="chev">▾</span></span>
           </div>
           <p class="coh-sum">${esc(c.summary)}</p>
-          <div class="coh-body"><div class="d2h-wrap" id="wrap-${ci}"></div></div>
+          <div class="coh-body"><div class="d2h-wrap" id="wrap-${ci}"><div class="coh-pending">rendering…</div></div></div>
         </section>`);
-
-      // Diff2HtmlUI (rather than Diff2Html.html) so highlightCode() can run
-      // the bundled highlight.js over the rendered lines.
-      const ui = new Diff2HtmlUI(document.getElementById(`wrap-${ci}`), sub,
-        { drawFileList: false, matching: "lines", outputFormat: FMT, highlight: true });
-      ui.draw();
-      ui.highlightCode();
-
-      // Anchor each rendered file card: diff2html emits one .d2h-file-wrapper
-      // per non-empty sub, in concatenation order, so pairing by index is
-      // exact.
-      const present = c.files.map((p, fi) => fi).filter(fi => subs[fi]);
-      document.getElementById(`coh-${ci}`).querySelectorAll(".d2h-file-wrapper").forEach((el, i) => {
-        if (present[i] !== undefined) el.id = `f-${ci}-${present[i]}`;
-      });
     });
 
     document.getElementById("meta").innerHTML =
       `${COHORTS.length} cohorts · ${nFiles} files · <span style="color:var(--add-ink)">+${tAdd}</span> <span style="color:var(--del-ink)">−${tDel}</span>`;
     setFmtButtons();
+
+    // Lazy render: drawing a cohort's diff (the diff2html build + highlight.js
+    // pass) is the expensive part, so defer it until the cohort nears the
+    // viewport. On a large PR only the visible cohorts ever get drawn, which is
+    // what stops the page from janking. jump()/jumpFile() force a render before
+    // scrolling to an off-screen target.
+    if ("IntersectionObserver" in window) {
+      io = new IntersectionObserver(entries => {
+        for (const e of entries) {
+          if (e.isIntersecting) { renderCohort(+e.target.dataset.ci); io.unobserve(e.target); }
+        }
+      }, { rootMargin: "800px 0px" });
+      document.querySelectorAll(".cohort").forEach(el => io.observe(el));
+    } else {
+      COHORTS.forEach((_, ci) => renderCohort(ci));
+    }
     applyDark();
+  }
+
+  // renderCohort draws one cohort's diff on demand (idempotent). Splitting the
+  // draw out of build() is what makes lazy rendering possible. Each file gets
+  // its own host div: large files are spotted from the parse BEFORE diff2html
+  // draws or highlights anything, and get a placeholder instead — the
+  // expensive draw runs only if the user expands them.
+  function renderCohort(ci) {
+    const st = cohortState[ci];
+    if (!st || st.rendered) return;
+    st.rendered = true;
+    const wrap = document.getElementById(`wrap-${ci}`);
+    wrap.innerHTML = "";
+    st.present.forEach(fi => {
+      const host = document.createElement("div");
+      host.className = "cr-file";
+      host.id = `f-${ci}-${fi}`;
+      wrap.appendChild(host);
+      const files = st.parsedSubs[fi];
+      if (files.some(isBigFile)) bigFilePlaceholder(host, st.subs[fi], files);
+      else drawDiff(host, st.subs[fi]);
+    });
+    applyDark();
+  }
+
+  // Diff2HtmlUI (rather than Diff2Html.html) so draw() runs the bundled
+  // highlight.js over the rendered lines (highlight: true).
+  function drawDiff(host, sub) {
+    new Diff2HtmlUI(host, sub,
+      { drawFileList: false, matching: "lines", outputFormat: FMT, highlight: true }).draw();
+  }
+
+  // diff2html keeps "dev/null" as the null side's name on adds/deletes.
+  const fileName = f => (f.newName && !f.newName.includes("dev/null") ? f.newName : f.oldName) || "";
+
+  // isBigFile flags the blobs that make big diffs janky: lockfiles, generated
+  // and minified assets, and anything with a very large change count.
+  function isBigFile(f) {
+    const name = fileName(f);
+    if (/(?:^|\/)(?:package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Gemfile\.lock|composer\.lock|Cargo\.lock|poetry\.lock|go\.sum)$/.test(name)) return true;
+    if (/(?:^|\/)(?:schema\.rb|structure\.sql)$/.test(name)) return true;
+    if (/(?:\.min\.js|\.min\.css|\.map|\.snap|\.pb\.go)$/.test(name)) return true;
+    if (/(?:^|\/)(?:dist|vendor|node_modules)\//.test(name)) return true;
+    return (f.addedLines || 0) + (f.deletedLines || 0) > 400;
+  }
+
+  // bigFilePlaceholder stands in for a large file's card; clicking "show"
+  // draws the real diff in place.
+  function bigFilePlaceholder(host, sub, files) {
+    const add = files.reduce((s, f) => s + (f.addedLines || 0), 0);
+    const del = files.reduce((s, f) => s + (f.deletedLines || 0), 0);
+    host.innerHTML = `<div class="cr-big"><div class="cr-name">${esc(fileName(files[0]))}</div>
+      <button class="cr-show">show large diff · +${add} −${del}</button></div>`;
+    host.querySelector(".cr-show").onclick = () => { drawDiff(host, sub); applyDark(); };
   }
 
   function setFmt(f) {
@@ -268,6 +355,7 @@
   function jump(id) {
     const el = document.getElementById(id);
     if (!el) return;
+    if (el.dataset.ci !== undefined) renderCohort(+el.dataset.ci);
     el.classList.remove("collapsed");
     el.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -276,6 +364,7 @@
   function jumpFile(ci, fi) {
     const sec = document.getElementById(`coh-${ci}`);
     if (!sec) return;
+    renderCohort(ci);
     sec.classList.remove("collapsed");
     (document.getElementById(`f-${ci}-${fi}`) || sec).scrollIntoView({ behavior: "smooth", block: "start" });
   }
