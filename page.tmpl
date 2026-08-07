@@ -96,9 +96,14 @@
      intrinsic-size is a rough placeholder so the scrollbar stays sane. */
   .d2h-wrap .d2h-file-wrapper { border-radius: 9px; overflow: hidden; margin-bottom: 12px; scroll-margin-top: 12px;
     content-visibility: auto; contain-intrinsic-size: 0 320px; }
-  /* Large/generated files (lockfiles, minified assets, huge hunks) render
-     collapsed behind a "show" button so one blob can't blow up the page. */
-  .d2h-wrap .d2h-file-wrapper.cr-collapsed .d2h-file-diff { display: none; }
+  /* Large/generated files (lockfiles, minified assets, huge hunks) render as a
+     placeholder card so one blob can't blow up the page; the expensive
+     diff2html draw + highlight runs only if the user expands it. */
+  .cr-file { scroll-margin-top: 12px; }
+  .cr-big { background: var(--panel); border: 1px solid var(--border); border-radius: 9px; overflow: hidden;
+    margin-bottom: 12px; }
+  .cr-big .cr-name { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--ink-2);
+    padding: 9px 14px; }
   .cr-show { display: block; width: 100%; text-align: left; cursor: pointer; font-family: var(--mono);
     font-size: 12px; color: var(--accent); background: var(--panel); border: 0;
     border-top: 1px solid var(--border); padding: 9px 14px; }
@@ -209,18 +214,20 @@
 
     COHORTS.forEach((c, ci) => {
       const subs = c.files.map(subFor);
-      const sub = subs.join("");
-      const parsed = Diff2Html.parse(sub);
+      // Parsed per sub so renderCohort can spot large files BEFORE the
+      // expensive diff2html draw + highlight pass touches them.
+      const parsedSubs = subs.map(s => s ? Diff2Html.parse(s) : []);
+      const parsed = parsedSubs.flat();
       const cAdd = parsed.reduce((s, f) => s + (f.addedLines || 0), 0);
       const cDel = parsed.reduce((s, f) => s + (f.deletedLines || 0), 0);
       tAdd += cAdd; tDel += cDel;
 
-      // present[i] maps the i-th rendered file card back to its cohort file
-      // index, for anchoring. Computed after subFor so an unsplittable
-      // downgrade this build is reflected. Stashed for renderCohort to use
-      // when the cohort is actually drawn.
+      // present: cohort file indices with a non-empty sub this build (computed
+      // after subFor so an unsplittable downgrade is reflected). Each gets its
+      // own host card in renderCohort, which is what the f-ci-fi anchors and
+      // jumpFile rely on.
       const present = c.files.map((p, fi) => fi).filter(fi => subs[fi]);
-      cohortState[ci] = { sub, parsed, present, rendered: false };
+      cohortState[ci] = { subs, parsedSubs, present, rendered: false };
 
       // Partial refs get a "k/M hunks" suffix.
       const label = p => {
@@ -274,35 +281,42 @@
   }
 
   // renderCohort draws one cohort's diff on demand (idempotent). Splitting the
-  // draw out of build() is what makes lazy rendering possible.
+  // draw out of build() is what makes lazy rendering possible. Each file gets
+  // its own host div: large files are spotted from the parse BEFORE diff2html
+  // draws or highlights anything, and get a placeholder instead — the
+  // expensive draw runs only if the user expands them.
   function renderCohort(ci) {
     const st = cohortState[ci];
     if (!st || st.rendered) return;
     st.rendered = true;
     const wrap = document.getElementById(`wrap-${ci}`);
     wrap.innerHTML = "";
-    // Diff2HtmlUI (rather than Diff2Html.html) so highlightCode() can run the
-    // bundled highlight.js over the rendered lines.
-    const ui = new Diff2HtmlUI(wrap, st.sub,
-      { drawFileList: false, matching: "lines", outputFormat: FMT, highlight: true });
-    ui.draw();
-    ui.highlightCode();
-
-    // Anchor each file card, and collapse the large/generated ones. diff2html
-    // emits one .d2h-file-wrapper per non-empty sub in concatenation order, so
-    // pairing with present[] and parsed[] by index is exact.
-    wrap.querySelectorAll(".d2h-file-wrapper").forEach((el, i) => {
-      if (st.present[i] !== undefined) el.id = `f-${ci}-${st.present[i]}`;
-      const f = st.parsed[i];
-      if (f && isBigFile(f)) collapseFile(el, f);
+    st.present.forEach(fi => {
+      const host = document.createElement("div");
+      host.className = "cr-file";
+      host.id = `f-${ci}-${fi}`;
+      wrap.appendChild(host);
+      const files = st.parsedSubs[fi];
+      if (files.some(isBigFile)) bigFilePlaceholder(host, st.subs[fi], files);
+      else drawDiff(host, st.subs[fi]);
     });
     applyDark();
   }
 
+  // Diff2HtmlUI (rather than Diff2Html.html) so draw() runs the bundled
+  // highlight.js over the rendered lines (highlight: true).
+  function drawDiff(host, sub) {
+    new Diff2HtmlUI(host, sub,
+      { drawFileList: false, matching: "lines", outputFormat: FMT, highlight: true }).draw();
+  }
+
+  // diff2html keeps "dev/null" as the null side's name on adds/deletes.
+  const fileName = f => (f.newName && !f.newName.includes("dev/null") ? f.newName : f.oldName) || "";
+
   // isBigFile flags the blobs that make big diffs janky: lockfiles, generated
   // and minified assets, and anything with a very large change count.
   function isBigFile(f) {
-    const name = f.newName || f.oldName || "";
+    const name = fileName(f);
     if (/(?:^|\/)(?:package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Gemfile\.lock|composer\.lock|Cargo\.lock|poetry\.lock|go\.sum)$/.test(name)) return true;
     if (/(?:^|\/)(?:schema\.rb|structure\.sql)$/.test(name)) return true;
     if (/(?:\.min\.js|\.min\.css|\.map|\.snap|\.pb\.go)$/.test(name)) return true;
@@ -310,14 +324,14 @@
     return (f.addedLines || 0) + (f.deletedLines || 0) > 400;
   }
 
-  // collapseFile hides a file's diff behind a click-to-show button.
-  function collapseFile(el, f) {
-    el.classList.add("cr-collapsed");
-    const btn = document.createElement("button");
-    btn.className = "cr-show";
-    btn.textContent = `show large diff · +${f.addedLines || 0} −${f.deletedLines || 0}`;
-    btn.onclick = () => { el.classList.remove("cr-collapsed"); btn.remove(); };
-    el.appendChild(btn);
+  // bigFilePlaceholder stands in for a large file's card; clicking "show"
+  // draws the real diff in place.
+  function bigFilePlaceholder(host, sub, files) {
+    const add = files.reduce((s, f) => s + (f.addedLines || 0), 0);
+    const del = files.reduce((s, f) => s + (f.deletedLines || 0), 0);
+    host.innerHTML = `<div class="cr-big"><div class="cr-name">${esc(fileName(files[0]))}</div>
+      <button class="cr-show">show large diff · +${add} −${del}</button></div>`;
+    host.querySelector(".cr-show").onclick = () => { drawDiff(host, sub); applyDark(); };
   }
 
   function setFmt(f) {
