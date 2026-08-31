@@ -788,7 +788,7 @@ and after the misc rule (from Task 2), add:
 
 ```go
 	b.WriteString("- A column-0 \"### DELETED:\" line in the diff content summarizes deleted files whose hunks are not shown: group ALL of its listed paths into ONE cohort with \"type\": \"deletion\".\n")
-	b.WriteString("- A column-0 \"### SIMILAR (like <rep>):\" line lists files whose change repeats the representative's: group them WITH that representative in a \"type\": \"mechanical\" cohort.\n")
+	b.WriteString("- A column-0 \"### SIMILAR (like <rep>):\" line lists files in the same directory with the same extension and a similar change size as the representative — their hunks are not shown: group them WITH that representative in a \"type\": \"mechanical\" cohort.\n")
 ```
 
 `Grouping` gains internal fields:
@@ -1664,6 +1664,7 @@ The handoff's checklist verbatim. Needs `./.env` creds + logged-in `claude` CLI 
 - [ ] backburner#7: facade group typed `nonfix`; string→[]byte refactor lands in semantic misc and sits **first**
 - [ ] #18: NIT group typed `mechanical` and starts collapsed; misc ≈ the ~8-line type refactor
 - [ ] `~/.cohort-review/runs.jsonl` gains three records with `misc_lines_pct` and `anchor` fields (`tail -3 ~/.cohort-review/runs.jsonl`)
+- [ ] Similar-fold observability: run once against a 100+-file same-shape PR (e.g. operational-bill-service#1328) and record group count, member counts, and the A/M status mix of members — this settles whether status-A (new) files should be excluded from similar folds and whether exact-dir keying captures the real clusters
 - [ ] Degradation tests still green (LLM failure → "All changes"); each new behavior has a test
 - [ ] `go vet ./...` and `go test ./...` fully green
 - [ ] Author rating recorded per PR (edit this section): pass at ≥「跟我想的類似」on all three. A miss = tune prompt rules / `minFoldSize`, rerun that golden only — not a redesign.
@@ -1763,6 +1764,7 @@ git commit -m "feat(anchors): in-diff anchor rule and best-effort jira issue anc
 - **Task 1** (applied in its commit): `diffsplit.go` parity header enumerates BOTH new-here functions ("deriveNameStatus and segmentStat are new here"); `TestSegmentStat` carries two extra mutation-killing cases (diff-of-a-diff `+++/---` guard; pre-hunk noise pinning the `inHunk` gate).
 - **Task 2** (applied in its commit): the misc prompt rule ends with an empty-anchor guard — "When the title and description declare nothing, infer the PR's main intents from the diff itself and reserve \"misc\" for changes serving none of them — a missing description never turns the whole PR into misc." (protects the empty-description golden backburner#7 and the `misc_lines_pct` metric); the claim rule reads "the question … (normally ONE; \"deletion\" below is the exception)"; the JSON shape line shows the full enum `"type": "claim|mechanical|deletion|nonfix|misc"`; `Cohort.Claim`'s doc comment cites "handoff W2" instead of the untraceable 三次盲測 phrase; `TestTypeAndClaimParsedValidated` has a third cohort (no `type` key → "claim").
 - **Task 3** (applied in its commit): `fold_test.go` gains `TestFoldOnlyDeletions`, pinning the status-D filter via the deletion fold's membership (deliberately robust to Task 4 turning the co-located modified files into a "similar" fold).
+- **Task 4** (applied in its commit): `TestFoldSimilarKeepsRepresentative` gains two non-member fixtures pinning the Dir and Ext key components; new `TestFoldSimilarRepTieFirstWins` (strict `>` tie-break); zero-churn similar groups (pure renames) are skipped with `TestFoldSimilarSkipsZeroChurn` + `renSeg` helper; a why-comment records the topDir-vs-path.Dir asymmetry and the inFold ordering assumption. OPEN QUESTION (do not resolve without data): should status-A files be excluded from similar folds? Settled by the Task 11 observability run against a #1328-shaped PR. Task 5's SIMILAR prompt rule was softened to claim only path/ext/size similarity, not content equivalence.
 - **Task 5 watch-notes** (from Task 3's review, for Task 5's reviewer): (a) a real #16595 DELETED line is ~7-8KB on one line — confirm the all-or-nothing budget check can't plausibly dump 217 members into Omitted under the default 200KB budget, and that the Omitted fallback stays honest when it does fire; (b) `Fold.Lines` is uniformly member churn (deletion members have added=0 by construction), so `folded_lines_pct` mixes nothing — no change needed, just don't "fix" it.
 - General: when a task adds a new-here function to a copied-parity file, its header enumeration must be updated in the same commit.
 
