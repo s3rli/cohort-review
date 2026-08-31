@@ -321,7 +321,10 @@ func groupCohorts(ctx context.Context, run groupFunc, pr PullRequest, segs []Fil
 		if err == nil {
 			mg, perr := parseGrouping(out)
 			if perr == nil {
-				if g := repairGrouping(mg, idx); len(g.Cohorts) > 0 {
+				// Usable = at least one model-derived (typed) cohort: a bare
+				// fallback bucket means the model grouped nothing — retry, then
+				// degrade honestly instead of reporting success.
+				if g := repairGrouping(mg, idx); len(g.Cohorts) > 1 || (len(g.Cohorts) == 1 && g.Cohorts[0].Type != "") {
 					g.FoldedLines = foldedLines
 					return g
 				}
@@ -410,8 +413,11 @@ func validType(t string) string {
 // claims all still-unclaimed hunks; the first claim wins (mirroring the old
 // duplicate-path rule), invalid refs are dropped with a log, a path's claims
 // merge into one FileRef at its first occurrence per cohort (full coverage
-// normalizes to a whole-file ref), leftovers sweep into a trailing "Other",
-// and empty cohorts are pruned.
+// normalizes to a whole-file ref), leftovers sweep into a trailing
+// "Unclassified (grouping fallback)" bucket, and empty cohorts are pruned.
+// Cohorts the model typed "misc" are then floated to the very front,
+// preserving their relative order — a review signal (undeclared changes),
+// distinct from the untyped fallback bucket, which always stays last.
 func repairGrouping(g modelGrouping, idx diffIndex) Grouping {
 	valid := make(map[string]bool, len(idx.paths))
 	for _, p := range idx.paths {
@@ -508,9 +514,22 @@ func repairGrouping(g modelGrouping, idx diffIndex) Grouping {
 			missed = append(missed, FileRef{Path: p, Hunks: left})
 		}
 	}
+	// W3 semantic flip: cohorts the model marked misc are a review signal
+	// ("undeclared by the description") and float to the very front. The
+	// fallback bucket appended below is a DIFFERENT thing — a fallback for
+	// files the model failed to mention — and stays last, untyped.
+	var misc, rest []Cohort
+	for _, c := range kept {
+		if c.Type == "misc" {
+			misc = append(misc, c)
+		} else {
+			rest = append(rest, c)
+		}
+	}
+	kept = append(misc, rest...)
 	if len(missed) > 0 {
 		kept = append(kept, Cohort{
-			Name:    "Other",
+			Name:    "Unclassified (grouping fallback)",
 			Summary: "Files the grouping pass didn't classify.",
 			Files:   missed,
 		})

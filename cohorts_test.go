@@ -352,7 +352,7 @@ func TestGroupCohortsFencedAndProseWrapped(t *testing.T) {
 	}
 }
 
-func TestRepairHallucinatedDroppedMissedToOther(t *testing.T) {
+func TestRepairMissedSweptToUnclassified(t *testing.T) {
 	out := `{"walkthrough": "w", "cohorts": [
 		{"name": "Auth", "summary": "s", "files": ["core/auth.go", "made/up.go"]}]}`
 	g := groupCohorts(context.Background(), canned(out), PullRequest{}, testSegs(), defaultBudget)
@@ -363,8 +363,8 @@ func TestRepairHallucinatedDroppedMissedToOther(t *testing.T) {
 		t.Errorf("hallucinated path not dropped: %v", g.Cohorts[0].Files)
 	}
 	last := g.Cohorts[len(g.Cohorts)-1]
-	if last.Name != "Other" || len(last.Files) != 2 {
-		t.Errorf("missed files not gathered into Other: %+v", last)
+	if last.Name != "Unclassified (grouping fallback)" || len(last.Files) != 2 {
+		t.Errorf("missed files not gathered into the fallback bucket: %+v", last)
 	}
 }
 
@@ -463,7 +463,7 @@ func TestRepairSplitAcrossCohorts(t *testing.T) {
 	}
 	assertRefs(t, g.Cohorts[0], "core/auth.go#1,3")
 	assertRefs(t, g.Cohorts[1], "core/auth.go#2", "core/util.go")
-	assertRefs(t, g.Cohorts[2], "img.png") // unclaimed binary swept to Other
+	assertRefs(t, g.Cohorts[2], "img.png") // unclaimed binary swept to the fallback bucket
 }
 
 func TestRepairBareClaimsRemainder(t *testing.T) {
@@ -493,11 +493,11 @@ func TestRepairSameCohortMergeSortNormalize(t *testing.T) {
 	assertRefs(t, g.Cohorts[len(g.Cohorts)-1], "core/util.go#2", "img.png")
 }
 
-func TestRepairLeftoverHunksToOther(t *testing.T) {
+func TestRepairLeftoverHunksToUnclassified(t *testing.T) {
 	out := `{"cohorts": [{"name": "A", "summary": "s", "files": ["core/auth.go#1"]}]}`
 	g := groupSplit(t, out)
 	last := g.Cohorts[len(g.Cohorts)-1]
-	if last.Name != "Other" {
+	if last.Name != "Unclassified (grouping fallback)" {
 		t.Fatalf("got %+v", g.Cohorts)
 	}
 	assertRefs(t, last, "core/auth.go#2,3", "core/util.go", "img.png")
@@ -513,7 +513,7 @@ func TestRepairInvalidHunkRefDropped(t *testing.T) {
 
 // TestRepairHunkPartition pins the core invariant: whatever the model emits,
 // every hunk of every file (and every bare-only file) lands in exactly one
-// cohort's refs, counting Other.
+// cohort's refs, counting the fallback bucket.
 func TestRepairHunkPartition(t *testing.T) {
 	outputs := []string{
 		`{"cohorts": [{"name": "A", "summary": "s", "files": ["core/auth.go#1", "core/auth.go#3"]},
@@ -704,5 +704,65 @@ func TestFoldLineAtFirstMemberPosition(t *testing.T) {
 	del, mid := strings.Index(in.Hunks, "### DELETED:"), strings.Index(in.Hunks, "mid/x.go")
 	if del < 0 || mid < 0 || del > mid {
 		t.Errorf("DELETED line not at first member's position: del=%d mid=%d", del, mid)
+	}
+}
+
+func TestSemanticMiscFloatsFirst(t *testing.T) {
+	out := `{"cohorts": [
+		{"name": "A", "summary": "s", "claim": "q?", "type": "claim", "files": ["core/auth.go", "core/util.go#1"]},
+		{"name": "Odd", "summary": "undeclared refactor", "claim": "what is this for?", "type": "misc", "files": ["core/util.go#2"]}]}`
+	g := groupSplit(t, out)
+	if len(g.Cohorts) != 3 {
+		t.Fatalf("got %+v", g.Cohorts)
+	}
+	first := g.Cohorts[0]
+	if first.Type != "misc" || first.Name != "Odd" || first.Summary != "undeclared refactor" {
+		t.Fatalf("semantic misc not floated first intact: %+v", first)
+	}
+	assertRefs(t, first, "core/util.go#2")
+	last := g.Cohorts[2]
+	if last.Name != "Unclassified (grouping fallback)" || last.Type != "" {
+		t.Fatalf("repair bucket wrong: %+v", last)
+	}
+	assertRefs(t, last, "img.png")
+}
+
+func TestSemanticMiscOrderStableAndExclusive(t *testing.T) {
+	out := `{"cohorts": [
+		{"name": "A", "summary": "s", "claim": "a?", "type": "claim", "files": ["core/auth.go"]},
+		{"name": "M1", "summary": "s", "claim": "m1?", "type": "misc", "files": ["core/util.go#1"]},
+		{"name": "N", "summary": "s", "claim": "n?", "type": "nonfix", "files": ["img.png"]},
+		{"name": "M2", "summary": "s", "claim": "m2?", "type": "misc", "files": ["core/util.go#2"]}]}`
+	g := groupSplit(t, out)
+	want := []string{"M1", "M2", "A", "N"}
+	if len(g.Cohorts) != len(want) {
+		t.Fatalf("got %+v", g.Cohorts)
+	}
+	for i, name := range want {
+		if g.Cohorts[i].Name != name {
+			t.Fatalf("order = %v, want %v", cohortNames(g), want)
+		}
+	}
+}
+
+func cohortNames(g Grouping) []string {
+	names := make([]string, len(g.Cohorts))
+	for i, c := range g.Cohorts {
+		names[i] = c.Name
+	}
+	return names
+}
+
+func TestGroupCohortsRetriesWhenModelGroupsNothing(t *testing.T) {
+	g := groupCohorts(context.Background(), canned(`{"cohorts": []}`, goodJSON), PullRequest{}, testSegs(), defaultBudget)
+	if len(g.Cohorts) != 2 || g.Degraded {
+		t.Fatalf("retry did not recover from empty grouping: %+v", g)
+	}
+}
+
+func TestGroupCohortsEmptyGroupingsDegrade(t *testing.T) {
+	g := groupCohorts(context.Background(), canned(`{"cohorts": []}`, `{"cohorts": []}`), PullRequest{}, testSegs(), defaultBudget)
+	if !g.Degraded || len(g.Cohorts) != 1 || g.Cohorts[0].Name != "All changes" {
+		t.Fatalf("empty groupings must degrade: %+v", g)
 	}
 }
