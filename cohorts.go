@@ -6,9 +6,11 @@
 // rules in sync for same-source convergence. Deliberate divergences beyond
 // that: a fenced PR title/description section, the within-cohort reading-order
 // rule, per-file truncation with its TRUNCATED note, a third +N/-M column in
-// the changed-files list, hunk-level "path#N" cohort refs, and the
+// the changed-files list, hunk-level "path#N" cohort refs, the
 // test-pairing rule (tests grouped with their system under test instead of a
-// trailing tests cohort).
+// trailing tests cohort), claim+type cohort fields (question-form claims,
+// five-type taxonomy), prompt-side DELETED/SIMILAR folding, and a
+// semantic-misc-first ordering.
 package main
 
 import (
@@ -36,9 +38,17 @@ type FileRef struct {
 }
 
 type Cohort struct {
-	Name    string    `json:"name"`
-	Summary string    `json:"summary"`
-	Files   []FileRef `json:"files"`
+	Name    string `json:"name"`
+	Summary string `json:"summary"`
+	// Claim is the question the reviewer must answer to approve this cohort
+	// (question form — handoff W2). Deletion cohorts carry the fixed three
+	// questions. Empty on untyped fallback cohorts.
+	Claim string `json:"claim"`
+	// Type: "claim" | "mechanical" | "deletion" | "nonfix" | "misc".
+	// Empty means untyped (repair fallback bucket, degraded cohort); unknown
+	// model values normalize to "claim" in repair.
+	Type  string    `json:"type"`
+	Files []FileRef `json:"files"`
 }
 
 type Grouping struct {
@@ -53,6 +63,8 @@ type Grouping struct {
 type modelCohort struct {
 	Name    string   `json:"name"`
 	Summary string   `json:"summary"`
+	Claim   string   `json:"claim"`
+	Type    string   `json:"type"`
 	Files   []string `json:"files"`
 }
 
@@ -208,7 +220,7 @@ func buildCohortPrompt(in promptInput, nonce string) string {
 	var b strings.Builder
 	b.WriteString("You are organizing a pull request so a human reviewer can read it in logical groups.\n\n")
 	b.WriteString("Respond with ONLY a single JSON object — no preamble, no explanation, no markdown code fence — matching exactly this shape:\n\n")
-	b.WriteString(`{"walkthrough": "...", "cohorts": [{"name": "...", "summary": "...", "files": ["path", ...]}]}` + "\n\n")
+	b.WriteString(`{"walkthrough": "...", "cohorts": [{"name": "...", "summary": "...", "claim": "...", "type": "claim|mechanical|deletion|nonfix|misc", "files": ["path", ...]}]}` + "\n\n")
 	b.WriteString("Rules:\n")
 	b.WriteString("- \"walkthrough\": one short paragraph, plain text (no markdown), describing what the PR does overall.\n")
 	b.WriteString("- \"cohorts\": group EVERY file from the changed-files list into named cohorts (a cohort is a group of related changes). Every hunk of every file must land in EXACTLY ONE cohort; a whole file in one cohort is the normal case.\n")
@@ -216,6 +228,9 @@ func buildCohortPrompt(in promptInput, nonce string) string {
 	b.WriteString("- A \"files\" entry may instead be \"path#N\" to claim a single hunk, where N comes from the \"### hunk path#N\" marker lines in the diff content. A bare path claims the file's remaining hunks. Split a file across cohorts ONLY when its hunks clearly serve different concerns — prefer whole files — and if you split a file, account for every one of its hunks.\n")
 	b.WriteString("- NEVER use \"path#N\" for files whose hunks are omitted or truncated (see any NOTE below): you have not seen their full change, so reference them by bare path only.\n")
 	b.WriteString("- \"name\": a short title (2-5 words). \"summary\": one line on what that cohort's changes are for.\n")
+	b.WriteString("- \"claim\": the question the reviewer must answer to approve the cohort (normally ONE; \"deletion\" below is the exception) (e.g. \"Does endpoint X now match the old gateway's behavior?\"). Ground it in what the hunks actually change.\n")
+	b.WriteString("- \"type\": \"claim\" for a normal verifiable intent (the default). \"mechanical\" for same-shape repeated churn, generated files, lockfiles, formatting, mass renames, or mechanical test churn — its claim is \"Verify the representative <path>; are the rest really the same shape?\". \"deletion\" for cohorts of deleted files — its claim is exactly: \"Is the removal complete? What takes over the coverage these files provided? What is the transition-period risk?\". \"nonfix\" when the cohort documents and pins CURRENT behavior instead of changing it (docs plus tests asserting the status quo) — the reviewer reviews the decision not to fix, not the code.\n")
+	b.WriteString("- Hunks that match NO intent stated in the PR title/description and do not clearly belong with any other cohort go in ONE cohort with \"type\": \"misc\", its summary noting these changes are undeclared and the author should be asked — never force-fit them into an intent cohort. Undeclared changes are a review signal. When the title and description declare nothing, infer the PR's main intents from the diff itself and reserve \"misc\" for changes serving none of them — a missing description never turns the whole PR into misc.\n")
 	b.WriteString("- Use the diff hunks to split unrelated concerns: two files may belong together even if their paths differ, and path-similar files may belong apart, based on what the hunks actually change.\n")
 	b.WriteString("- Use the PR title and description (when present) as context for the walkthrough and cohort names, but ground everything in the diff — the description may be stale, partial, or wrong.\n")
 	b.WriteString("- Group tests WITH the code they test: a unit or integration test belongs in the same cohort as its system under test, ordered after it — tests are the change's specification. A cross-cutting test goes with the cohort it most exercises. Do not pair mechanical test churn (mass renames, regenerated fixtures or snapshots).\n")
@@ -340,6 +355,16 @@ func parseGrouping(out string) (modelGrouping, error) {
 	return g, nil
 }
 
+// validType normalizes a model-emitted cohort type; anything unexpected is a
+// plain claim cohort (handoff W2: missing → claim, unknown → claim).
+func validType(t string) string {
+	switch t {
+	case "claim", "mechanical", "deletion", "nonfix", "misc":
+		return t
+	}
+	return "claim"
+}
+
 // repairGrouping validates and normalizes the model output against the
 // hunk-level ground truth: every hunk of every changed file (and every
 // bare-only file) lands in exactly one cohort by construction. Walking
@@ -421,7 +446,8 @@ func repairGrouping(g modelGrouping, idx diffIndex) Grouping {
 		if len(refs) == 0 {
 			continue
 		}
-		kept = append(kept, Cohort{Name: mc.Name, Summary: mc.Summary, Files: refs})
+		kept = append(kept, Cohort{Name: mc.Name, Summary: mc.Summary,
+			Claim: mc.Claim, Type: validType(mc.Type), Files: refs})
 	}
 	var missed []FileRef
 	for _, p := range idx.paths {

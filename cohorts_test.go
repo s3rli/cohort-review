@@ -327,8 +327,8 @@ func canned(outputs ...string) groupFunc {
 }
 
 const goodJSON = `{"walkthrough": "Adds auth.", "cohorts": [
-	{"name": "Auth", "summary": "core auth", "files": ["core/auth.go", "core/session.go"]},
-	{"name": "Docs", "summary": "docs", "files": ["docs/README.md"]}]}`
+	{"name": "Auth", "summary": "core auth", "claim": "Does auth validate sessions?", "type": "claim", "files": ["core/auth.go", "core/session.go"]},
+	{"name": "Docs", "summary": "docs", "claim": "Do the docs match the new flow?", "type": "claim", "files": ["docs/README.md"]}]}`
 
 func TestGroupCohortsCleanJSON(t *testing.T) {
 	g := groupCohorts(context.Background(), canned(goodJSON), PullRequest{}, testSegs(), defaultBudget)
@@ -583,5 +583,35 @@ func TestGroupCohortsErrorThenFallback(t *testing.T) {
 	g := groupCohorts(context.Background(), fail, PullRequest{}, testSegs(), defaultBudget)
 	if len(g.Cohorts) != 1 || g.Cohorts[0].Name != "All changes" {
 		t.Fatalf("expected fallback cohort, got %+v", g.Cohorts)
+	}
+}
+
+func TestTypeAndClaimParsedValidated(t *testing.T) {
+	out := `{"cohorts": [
+		{"name": "A", "summary": "s", "claim": "is the decision sound?", "type": "nonfix", "files": ["core/auth.go"]},
+		{"name": "B", "summary": "s", "claim": "b?", "type": "bogus", "files": ["core/session.go"]},
+		{"name": "C", "summary": "s", "claim": "c?", "files": ["docs/README.md"]}]}`
+	g := groupCohorts(context.Background(), canned(out), PullRequest{}, testSegs(), defaultBudget)
+	if g.Cohorts[0].Claim != "is the decision sound?" || g.Cohorts[0].Type != "nonfix" {
+		t.Errorf("cohort A: %+v", g.Cohorts[0])
+	}
+	if g.Cohorts[0].Summary != "s" {
+		t.Errorf("summary lost: %+v", g.Cohorts[0])
+	}
+	if g.Cohorts[1].Type != "claim" {
+		t.Errorf("bogus type not normalized to claim: %+v", g.Cohorts[1])
+	}
+	if g.Cohorts[2].Type != "claim" {
+		t.Errorf("missing type not normalized to claim: %+v", g.Cohorts[2])
+	}
+}
+
+func TestClaimTypeRulesInPrompt(t *testing.T) {
+	p := buildCohortPrompt(promptInput{NameStatus: "M\ta.go\t+1/-0\n"}, "nonce")
+	for _, frag := range []string{`"claim"`, `"type"`, "nonfix", "transition-period risk",
+		"never force-fit", "review signal"} {
+		if !strings.Contains(p, frag) {
+			t.Errorf("prompt missing rule fragment %q", frag)
+		}
 	}
 }
