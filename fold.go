@@ -5,7 +5,11 @@
 // deletion/mechanical cohorts. Grouping ground truth and repair are untouched.
 package main
 
-import "strings"
+import (
+	"path"
+	"strconv"
+	"strings"
+)
 
 // minFoldSize is deliberately conservative: a false fold hides real hunks from
 // the model, and folding only pays off on genuine repetition.
@@ -25,6 +29,17 @@ func topDir(p string) string {
 		return p[:i]
 	}
 	return "."
+}
+
+// magnitude buckets churn by order of magnitude: 0–9 → 0, 10–99 → 1, 100–999 → 2…
+// "similar change size" for the same-shape fold key.
+func magnitude(n int) int {
+	m := 0
+	for n >= 10 {
+		n /= 10
+		m++
+	}
+	return m
 }
 
 // foldSegments plans prompt-side folding. Preamble (empty Path) and duplicate
@@ -69,6 +84,58 @@ func foldSegments(segs []FileSegment) []Fold {
 		f := Fold{Kind: "deletion", Members: members, Dir: d}
 		for _, p := range members {
 			f.Lines += stats[p].added + stats[p].deleted
+		}
+		folds = append(folds, f)
+	}
+
+	// Similar folds key on the EXACT directory (handoff W1: 同目錄) —
+	// deliberately finer than the deletion pass's topDir: repetition is a
+	// per-package signal, deletion piles are a per-tree one. inFold assumes
+	// every already-emitted fold is deletion-only (no Rep); revisit if a fold
+	// kind with a Rep is ever emitted first.
+	inFold := make(map[string]bool)
+	for _, f := range folds {
+		for _, p := range f.Members {
+			inFold[p] = true
+		}
+	}
+	simGroups := make(map[string][]string)
+	var simOrder []string
+	for _, s := range segs {
+		p := s.Path
+		if !foldable(p) || inFold[p] || stats[p].status == "D" {
+			continue
+		}
+		st := stats[p]
+		key := path.Dir(p) + "\x00" + path.Ext(p) + "\x00" + strconv.Itoa(magnitude(st.added+st.deleted))
+		if len(simGroups[key]) == 0 {
+			simOrder = append(simOrder, key)
+		}
+		simGroups[key] = append(simGroups[key], p)
+	}
+	for _, k := range simOrder {
+		group := simGroups[k]
+		if len(group) < minFoldSize {
+			continue
+		}
+		f := Fold{Kind: "similar"}
+		best := -1
+		for _, p := range group {
+			if c := stats[p].added + stats[p].deleted; c > best {
+				best, f.Rep = c, p
+			}
+		}
+		for _, p := range group {
+			if p == f.Rep {
+				continue
+			}
+			f.Members = append(f.Members, p)
+			f.Lines += stats[p].added + stats[p].deleted
+		}
+		if f.Lines == 0 {
+			// A zero-churn group (pure renames) saves nothing and would point
+			// the model at a representative with no hunks.
+			continue
 		}
 		folds = append(folds, f)
 	}
