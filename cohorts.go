@@ -54,6 +54,8 @@ type Cohort struct {
 type Grouping struct {
 	Walkthrough string   `json:"walkthrough"`
 	Cohorts     []Cohort `json:"cohorts"`
+	Degraded    bool     `json:"-"` // grouping fell back to "All changes"
+	FoldedLines int      `json:"-"` // churn replaced by DELETED/SIMILAR lines
 }
 
 // modelCohort/modelGrouping are the shapes the LLM emits: files entries are
@@ -108,14 +110,23 @@ type promptInput struct {
 	Truncated   []string // paths reduced to their leading hunks to fit the budget
 }
 
-// buildPromptInput assembles the model input from per-file segments. Hunks are
-// included greedily in diff order; a segment that would overflow the budget is
-// reduced to its leading whole hunks (never cut mid-hunk) under a per-file cap,
-// or skipped whole when even that doesn't fit — later, smaller segments still
-// get in, so one giant lockfile early can't evict everything after it. Both
-// lists are prompt-only: the served page always renders the full diff.
-func buildPromptInput(segs []FileSegment, budget int) promptInput {
+// buildPromptInput assembles the model input from per-file segments. Fold
+// members' hunks are replaced by one summary line per fold (emitted at the
+// first member's diff position); everything else is included greedily in diff
+// order as before — a segment that would overflow the budget is reduced to its
+// leading whole hunks under a per-file cap, or skipped whole. Folding runs
+// FIRST, the greedy budget is the backstop. All lists are prompt-only: the
+// served page always renders the full diff.
+func buildPromptInput(segs []FileSegment, folds []Fold, budget int) promptInput {
 	in := promptInput{NameStatus: deriveNameStatus(segs)}
+	skip := make(map[string]bool)
+	foldAt := make(map[string]Fold) // first member's path → its fold
+	for _, f := range folds {
+		for _, p := range f.Members {
+			skip[p] = true
+		}
+		foldAt[f.Members[0]] = f
+	}
 	// The cap bounds what a truncated over-budget file may consume (files that
 	// fit whole are never capped). Deliberately no floor: at tiny budgets the
 	// cap shrinks until truncation fails and files degrade to Omitted — the
@@ -126,6 +137,23 @@ func buildPromptInput(segs []FileSegment, budget int) promptInput {
 	used := 0
 	for _, s := range segs {
 		if s.Path == "" {
+			continue
+		}
+		if skip[s.Path] {
+			f, first := foldAt[s.Path]
+			if !first {
+				continue
+			}
+			delete(foldAt, s.Path) // a duplicate-position path emits its fold once
+			line := foldLine(f)
+			if used+len(line) <= budget {
+				hunks.WriteString(line)
+				used += len(line)
+			} else {
+				// No room even for the summary: degrade the members to the
+				// honest Omitted list instead of vanishing.
+				in.Omitted = append(in.Omitted, f.Members...)
+			}
 			continue
 		}
 		ann := annotateSegmentHunks(s.Path, s.Raw)
@@ -226,11 +254,13 @@ func buildCohortPrompt(in promptInput, nonce string) string {
 	b.WriteString("- \"cohorts\": group EVERY file from the changed-files list into named cohorts (a cohort is a group of related changes). Every hunk of every file must land in EXACTLY ONE cohort; a whole file in one cohort is the normal case.\n")
 	b.WriteString("- \"files\" entries must be paths copied VERBATIM from the changed-files list — the path column ONLY, never the status letter or the +N/-M counts. Never invent, abbreviate, or merge paths.\n")
 	b.WriteString("- A \"files\" entry may instead be \"path#N\" to claim a single hunk, where N comes from the \"### hunk path#N\" marker lines in the diff content. A bare path claims the file's remaining hunks. Split a file across cohorts ONLY when its hunks clearly serve different concerns — prefer whole files — and if you split a file, account for every one of its hunks.\n")
-	b.WriteString("- NEVER use \"path#N\" for files whose hunks are omitted or truncated (see any NOTE below): you have not seen their full change, so reference them by bare path only.\n")
+	b.WriteString("- NEVER use \"path#N\" for files whose hunks are omitted or truncated (see any NOTE below): you have not seen their full change, so reference them by bare path only. Files listed on \"### DELETED:\" or \"### SIMILAR\" lines are likewise bare-path only.\n")
 	b.WriteString("- \"name\": a short title (2-5 words). \"summary\": one line on what that cohort's changes are for.\n")
 	b.WriteString("- \"claim\": the question the reviewer must answer to approve the cohort (normally ONE; \"deletion\" below is the exception) (e.g. \"Does endpoint X now match the old gateway's behavior?\"). Ground it in what the hunks actually change.\n")
 	b.WriteString("- \"type\": \"claim\" for a normal verifiable intent (the default). \"mechanical\" for same-shape repeated churn, generated files, lockfiles, formatting, mass renames, or mechanical test churn — its claim is \"Verify the representative <path>; are the rest really the same shape?\". \"deletion\" for cohorts of deleted files — its claim is exactly: \"Is the removal complete? What takes over the coverage these files provided? What is the transition-period risk?\". \"nonfix\" when the cohort documents and pins CURRENT behavior instead of changing it (docs plus tests asserting the status quo) — the reviewer reviews the decision not to fix, not the code.\n")
 	b.WriteString("- Hunks that match NO intent stated in the PR title/description and do not clearly belong with any other cohort go in ONE cohort with \"type\": \"misc\", its summary noting these changes are undeclared and the author should be asked — never force-fit them into an intent cohort. Undeclared changes are a review signal. When the title and description declare nothing, infer the PR's main intents from the diff itself and reserve \"misc\" for changes serving none of them — a missing description never turns the whole PR into misc.\n")
+	b.WriteString("- A column-0 \"### DELETED:\" line in the diff content summarizes deleted files whose hunks are not shown: group ALL of its listed paths into ONE cohort with \"type\": \"deletion\".\n")
+	b.WriteString("- A column-0 \"### SIMILAR (like <rep>):\" line lists files in the same directory with the same extension and a similar change size as the representative — their hunks are not shown: group them WITH that representative in a \"type\": \"mechanical\" cohort.\n")
 	b.WriteString("- Use the diff hunks to split unrelated concerns: two files may belong together even if their paths differ, and path-similar files may belong apart, based on what the hunks actually change.\n")
 	b.WriteString("- Use the PR title and description (when present) as context for the walkthrough and cohort names, but ground everything in the diff — the description may be stale, partial, or wrong.\n")
 	b.WriteString("- Group tests WITH the code they test: a unit or integration test belongs in the same cohort as its system under test, ordered after it — tests are the change's specification. A cross-cutting test goes with the cohort it most exercises. Do not pair mechanical test churn (mass renames, regenerated fixtures or snapshots).\n")
@@ -276,15 +306,23 @@ type groupFunc func(ctx context.Context, prompt string) (string, error)
 // fallback so the page always renders.
 func groupCohorts(ctx context.Context, run groupFunc, pr PullRequest, segs []FileSegment, budget int) Grouping {
 	idx := indexSegments(segs)
-	in := buildPromptInput(segs, budget)
+	folds := foldSegments(segs)
+	foldedLines := 0
+	for _, f := range folds {
+		foldedLines += f.Lines
+	}
+	in := buildPromptInput(segs, folds, budget)
 	in.Title, in.Description = pr.Title, pr.Description
 	prompt := buildCohortPrompt(in, NewNonce())
+	fmt.Fprintf(os.Stderr, "cohort-review: prompt hunks %d KB (%d lines folded)\n",
+		len(in.Hunks)/1024, foldedLines)
 	for attempt := 1; attempt <= 2; attempt++ {
 		out, err := run(ctx, prompt)
 		if err == nil {
 			mg, perr := parseGrouping(out)
 			if perr == nil {
 				if g := repairGrouping(mg, idx); len(g.Cohorts) > 0 {
+					g.FoldedLines = foldedLines
 					return g
 				}
 				err = fmt.Errorf("no usable cohorts in model output")
@@ -295,7 +333,7 @@ func groupCohorts(ctx context.Context, run groupFunc, pr PullRequest, segs []Fil
 		fmt.Fprintf(os.Stderr, "cohort-review: grouping attempt %d failed: %v\n", attempt, err)
 	}
 	fmt.Fprintln(os.Stderr, "cohort-review: automatic grouping unavailable — showing all files in one cohort")
-	return Grouping{Cohorts: []Cohort{{
+	return Grouping{Degraded: true, FoldedLines: foldedLines, Cohorts: []Cohort{{
 		Name:    "All changes",
 		Summary: "Automatic grouping unavailable — showing all files.",
 		Files:   bareRefs(idx.paths),

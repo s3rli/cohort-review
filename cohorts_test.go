@@ -138,7 +138,7 @@ func annLen(s FileSegment) int {
 }
 
 func TestBuildPromptInputUnderBudget(t *testing.T) {
-	in := buildPromptInput(testSegs(), defaultBudget)
+	in := buildPromptInput(testSegs(), nil, defaultBudget)
 	if len(in.Omitted) != 0 {
 		t.Errorf("unexpected omissions: %v", in.Omitted)
 	}
@@ -161,7 +161,7 @@ func TestBuildPromptInputGreedySkip(t *testing.T) {
 	giant := seg("vendor/lock.json", "diff --git a/vendor/lock.json b/vendor/lock.json\n@@ -1,200 +1,200 @@\n"+strings.Repeat("+x\n", 200))
 	segs := append([]FileSegment{giant}, testSegs()...)
 	budget := annLen(testSegs()[0]) + annLen(testSegs()[1]) + annLen(testSegs()[2])
-	in := buildPromptInput(segs, budget)
+	in := buildPromptInput(segs, nil, budget)
 	// The giant first segment is skipped whole; every later small file still fits.
 	if len(in.Omitted) != 1 || in.Omitted[0] != "vendor/lock.json" {
 		t.Fatalf("omitted = %v, want [vendor/lock.json]", in.Omitted)
@@ -214,7 +214,7 @@ func TestBuildPromptInputTruncatesLeadingHunks(t *testing.T) {
 	// Budget makes the per-file cap exactly header+hunk1: the giant is
 	// truncated after its first hunk instead of being omitted whole.
 	budget := (len(header) + len(hunk1)) * 8
-	in := buildPromptInput(segs, budget)
+	in := buildPromptInput(segs, nil, budget)
 	if len(in.Truncated) != 1 || in.Truncated[0] != "big.go" {
 		t.Fatalf("truncated = %v, want [big.go]", in.Truncated)
 	}
@@ -248,7 +248,7 @@ func TestBuildPromptInputTruncationFallsBackToOmitted(t *testing.T) {
 	// impossible and the file degrades to omission, as before truncation
 	// existed. The small files still fit whole.
 	budget := 600
-	in := buildPromptInput(segs, budget)
+	in := buildPromptInput(segs, nil, budget)
 	if len(in.Omitted) != 1 || in.Omitted[0] != "big.go" {
 		t.Fatalf("omitted = %v, want [big.go]", in.Omitted)
 	}
@@ -334,6 +334,9 @@ func TestGroupCohortsCleanJSON(t *testing.T) {
 	g := groupCohorts(context.Background(), canned(goodJSON), PullRequest{}, testSegs(), defaultBudget)
 	if g.Walkthrough != "Adds auth." || len(g.Cohorts) != 2 {
 		t.Fatalf("got %+v", g)
+	}
+	if g.Degraded {
+		t.Error("Degraded set on success")
 	}
 }
 
@@ -574,6 +577,9 @@ func TestGroupCohortsFallbackAfterTwoFailures(t *testing.T) {
 	if len(g.Cohorts[0].Files) != 3 {
 		t.Errorf("fallback must cover all files: %v", g.Cohorts[0].Files)
 	}
+	if !g.Degraded {
+		t.Error("Degraded not set on fallback")
+	}
 }
 
 func TestGroupCohortsErrorThenFallback(t *testing.T) {
@@ -613,5 +619,90 @@ func TestClaimTypeRulesInPrompt(t *testing.T) {
 		if !strings.Contains(p, frag) {
 			t.Errorf("prompt missing rule fragment %q", frag)
 		}
+	}
+}
+
+func TestFoldedPromptDeletion(t *testing.T) {
+	segs := append(testSegs(), fiveDels()...)
+	in := buildPromptInput(segs, foldSegments(segs), defaultBudget)
+	if !strings.Contains(in.Hunks, "### DELETED: 5 files under old/ (-10 lines): old/a.go, old/b.go, old/c.go, old/d.go, old/e.go") {
+		t.Errorf("DELETED line missing or wrong: %q", in.Hunks)
+	}
+	if strings.Contains(in.Hunks, "diff --git a/old/a.go") {
+		t.Error("folded hunks still in prompt")
+	}
+	if len(in.Omitted) != 0 {
+		t.Errorf("folded files wrongly listed as omitted: %v", in.Omitted)
+	}
+	// every file must remain groupable: changed-files list intact
+	for _, p := range []string{"old/a.go", "core/auth.go"} {
+		if !strings.Contains(in.NameStatus, p) {
+			t.Errorf("changed-files list missing %s", p)
+		}
+	}
+}
+
+func TestFoldedPromptSimilarKeepsRepHunks(t *testing.T) {
+	segs := []FileSegment{
+		mechSeg("cfg/a.yaml", 1), mechSeg("cfg/b.yaml", 1), mechSeg("cfg/c.yaml", 1),
+		mechSeg("cfg/d.yaml", 1), mechSeg("cfg/e.yaml", 4),
+	}
+	in := buildPromptInput(segs, foldSegments(segs), defaultBudget)
+	if !strings.Contains(in.Hunks, "### hunk cfg/e.yaml#1") {
+		t.Error("representative hunks missing")
+	}
+	if !strings.Contains(in.Hunks, "### SIMILAR (like cfg/e.yaml): cfg/a.yaml, cfg/b.yaml, cfg/c.yaml, cfg/d.yaml") {
+		t.Errorf("SIMILAR line missing or wrong: %q", in.Hunks)
+	}
+	if strings.Contains(in.Hunks, "### hunk cfg/a.yaml") {
+		t.Error("member hunks still in prompt")
+	}
+}
+
+func TestFoldRulesInPrompt(t *testing.T) {
+	p := buildCohortPrompt(promptInput{NameStatus: "M\ta.go\t+1/-0\n"}, "nonce")
+	for _, frag := range []string{"### DELETED:", "### SIMILAR", `"type": "deletion"`,
+		`"type": "mechanical"`} {
+		if !strings.Contains(p, frag) {
+			t.Errorf("prompt missing fold rule fragment %q", frag)
+		}
+	}
+}
+
+func TestGroupCohortsFoldedLines(t *testing.T) {
+	segs := append(testSegs(), fiveDels()...)
+	g := groupCohorts(context.Background(), canned(goodJSON), PullRequest{}, segs, defaultBudget)
+	if g.FoldedLines != 10 {
+		t.Errorf("FoldedLines = %d, want 10", g.FoldedLines)
+	}
+	// The folded files were not claimed by goodJSON — repair still sweeps them,
+	// so the partition invariant holds with folding active.
+	last := g.Cohorts[len(g.Cohorts)-1]
+	if len(last.Files) != 5 {
+		t.Errorf("folded files not swept by repair: %+v", last)
+	}
+}
+
+func TestFoldedPromptOverBudgetDegradesToOmitted(t *testing.T) {
+	segs := append([]FileSegment{mechSeg("core/big.go", 60)}, fiveDels()...)
+	folds := foldSegments(segs)
+	// Fits the leading file, one byte short of also fitting the fold line.
+	budget := annLen(segs[0]) + len(foldLine(folds[0])) - 1
+	in := buildPromptInput(segs, folds, budget)
+	if strings.Contains(in.Hunks, "### DELETED") {
+		t.Error("fold line emitted although it does not fit the budget")
+	}
+	if len(in.Omitted) != 5 || in.Omitted[0] != "old/a.go" {
+		t.Errorf("members must degrade to the Omitted list, got %v", in.Omitted)
+	}
+}
+
+func TestFoldLineAtFirstMemberPosition(t *testing.T) {
+	segs := append(testSegs(), delSeg("old/a.go"), mechSeg("mid/x.go", 1),
+		delSeg("old/b.go"), delSeg("old/c.go"), delSeg("old/d.go"), delSeg("old/e.go"))
+	in := buildPromptInput(segs, foldSegments(segs), defaultBudget)
+	del, mid := strings.Index(in.Hunks, "### DELETED:"), strings.Index(in.Hunks, "mid/x.go")
+	if del < 0 || mid < 0 || del > mid {
+		t.Errorf("DELETED line not at first member's position: del=%d mid=%d", del, mid)
 	}
 }

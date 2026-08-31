@@ -6,6 +6,7 @@
 package main
 
 import (
+	"fmt"
 	"path"
 	"strconv"
 	"strings"
@@ -140,4 +141,17 @@ func foldSegments(segs []FileSegment) []Fold {
 		folds = append(folds, f)
 	}
 	return folds
+}
+
+// foldLine renders one fold as a column-0 marker line inside the diff fence —
+// like "### hunk", a column-0 line there is always tool-generated. All member
+// paths are listed so the model can copy them verbatim into cohorts.
+func foldLine(f Fold) string {
+	switch f.Kind {
+	case "deletion":
+		return fmt.Sprintf("### DELETED: %d files under %s/ (-%d lines): %s\n",
+			len(f.Members), f.Dir, f.Lines, strings.Join(f.Members, ", "))
+	default: // similar
+		return fmt.Sprintf("### SIMILAR (like %s): %s\n", f.Rep, strings.Join(f.Members, ", "))
+	}
 }
