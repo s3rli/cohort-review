@@ -1,7 +1,8 @@
 // Copied from code-review-agent internal/vcs/diffsplit.go, plus diffFileHeader
 // from internal/vcs/diffmap.go — keep parity for same-source convergence.
-// deriveNameStatus is new here: the CLI has no local checkout to run
-// `git diff --name-status` in, so status is derived from segment headers.
+// deriveNameStatus and segmentStat are new here: the CLI has no local
+// checkout to run `git diff --name-status` in, so status is derived from
+// segment headers.
 package main
 
 import (
@@ -84,6 +85,40 @@ func segmentPath(raw string) string {
 	return oldPath
 }
 
+// segmentStat derives one segment's name-status fields (status letter,
+// added/deleted line counts) from its raw text; shared by deriveNameStatus
+// and mechanical folding.
+func segmentStat(s FileSegment) (status string, added, deleted int) {
+	status = "M"
+	inHunk := false
+	for _, line := range strings.Split(s.Raw, "\n") {
+		if strings.HasPrefix(line, "@@ ") {
+			inHunk = true
+			continue
+		}
+		if !inHunk {
+			switch {
+			case strings.HasPrefix(line, "new file mode"):
+				status = "A"
+			case strings.HasPrefix(line, "deleted file mode"):
+				status = "D"
+			case strings.HasPrefix(line, "rename from "):
+				status = "R"
+			}
+			continue
+		}
+		// The +++/--- guard matters only for diff-of-a-diff content,
+		// where an added line can itself be a file header.
+		switch {
+		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
+			added++
+		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
+			deleted++
+		}
+	}
+	return status, added, deleted
+}
+
 // deriveNameStatus builds a "status<TAB>path<TAB>+added/-deleted" list from
 // segment headers and hunks. The path column is exactly the segment Path (the
 // groupable ground truth) — a rename shows only its new-side path so the model
@@ -96,34 +131,7 @@ func deriveNameStatus(segs []FileSegment) string {
 		if s.Path == "" {
 			continue
 		}
-		status := "M"
-		added, deleted := 0, 0
-		inHunk := false
-		for _, line := range strings.Split(s.Raw, "\n") {
-			if strings.HasPrefix(line, "@@ ") {
-				inHunk = true
-				continue
-			}
-			if !inHunk {
-				switch {
-				case strings.HasPrefix(line, "new file mode"):
-					status = "A"
-				case strings.HasPrefix(line, "deleted file mode"):
-					status = "D"
-				case strings.HasPrefix(line, "rename from "):
-					status = "R"
-				}
-				continue
-			}
-			// The +++/--- guard matters only for diff-of-a-diff content,
-			// where an added line can itself be a file header.
-			switch {
-			case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
-				added++
-			case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
-				deleted++
-			}
-		}
+		status, added, deleted := segmentStat(s)
 		fmt.Fprintf(&b, "%s\t%s\t+%d/-%d\n", status, s.Path, added, deleted)
 	}
 	return b.String()

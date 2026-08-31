@@ -78,3 +78,29 @@ func TestDeriveNameStatus(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+func TestSegmentStat(t *testing.T) {
+	cases := []struct {
+		raw     string
+		status  string
+		added   int
+		deleted int
+	}{
+		{"diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-x\n+y\n", "M", 1, 1},
+		{"diff --git a/n.go b/n.go\nnew file mode 100644\n+++ b/n.go\n@@ -0,0 +1,2 @@\n+a\n+b\n", "A", 2, 0},
+		{"diff --git a/d.go b/d.go\ndeleted file mode 100644\n--- a/d.go\n@@ -1,2 +0,0 @@\n-a\n-b\n", "D", 0, 2},
+		{"diff --git a/o.go b/r.go\nrename from o.go\nrename to r.go\n", "R", 0, 0},
+		// Pins the +++/--- guard: diff-of-a-diff hunk bodies contain literal
+		// file-header lines that must not count as churn.
+		{"diff --git a/p.patch b/p.patch\n--- a/p.patch\n+++ b/p.patch\n@@ -1,4 +1,4 @@\n+++ b/inner.go\n--- a/inner.go\n+real\n-gone\n", "M", 1, 1},
+		// Pins the inHunk gate: nothing before the first "@@ " counts.
+		{"diff --git a/w.go b/w.go\n-preamble noise\n--- a/w.go\n+++ b/w.go\n@@ -1 +1 @@\n+y\n", "M", 1, 0},
+	}
+	for _, c := range cases {
+		status, added, deleted := segmentStat(FileSegment{Path: "p", Raw: c.raw})
+		if status != c.status || added != c.added || deleted != c.deleted {
+			t.Errorf("segmentStat(%.30q) = %s +%d/-%d, want %s +%d/-%d",
+				c.raw, status, added, deleted, c.status, c.added, c.deleted)
+		}
+	}
+}
