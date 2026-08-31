@@ -1758,6 +1758,12 @@ git commit -m "feat(anchors): in-diff anchor rule and best-effort jira issue anc
 
 ---
 
+## Review-driven amendments (normative — supersede the embedded code blocks above)
+
+- **Task 1** (applied in its commit): `diffsplit.go` parity header enumerates BOTH new-here functions ("deriveNameStatus and segmentStat are new here"); `TestSegmentStat` carries two extra mutation-killing cases (diff-of-a-diff `+++/---` guard; pre-hunk noise pinning the `inHunk` gate).
+- **Task 2** (applied in its commit): the misc prompt rule ends with an empty-anchor guard — "When the title and description declare nothing, infer the PR's main intents from the diff itself and reserve \"misc\" for changes serving none of them — a missing description never turns the whole PR into misc." (protects the empty-description golden backburner#7 and the `misc_lines_pct` metric); the claim rule reads "the question … (normally ONE; \"deletion\" below is the exception)"; the JSON shape line shows the full enum `"type": "claim|mechanical|deletion|nonfix|misc"`; `Cohort.Claim`'s doc comment cites "handoff W2" instead of the untraceable 三次盲測 phrase; `TestTypeAndClaimParsedValidated` has a third cohort (no `type` key → "claim").
+- General: when a task adds a new-here function to a copied-parity file, its header enumeration must be updated in the same commit.
+
 ## Self-review notes
 
 - **Handoff coverage**: W1 → Tasks 3/4/5 (prompt-side folding, all paths listed, greedy budget kept as backstop, <30KB acceptance observable via the stderr/harness size print); W2 → Tasks 2/8 (Claim question-form + Type, deletion three questions, nonfix rule, badges, collapsed defaults); W3 → Task 6 (semantic misc first, fallback bucket renamed and kept last — two buckets, not merged); W4 → Task 7 (exact schema incl. error lines, `runs.jsonl`); W6 → Task 10; W5 → Task 12 (optional, as the handoff marks it); acceptance checklist → Task 11 (incl. `go vet`).
