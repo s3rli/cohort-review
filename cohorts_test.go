@@ -615,7 +615,10 @@ func TestTypeAndClaimParsedValidated(t *testing.T) {
 func TestClaimTypeRulesInPrompt(t *testing.T) {
 	p := buildCohortPrompt(promptInput{NameStatus: "M\ta.go\t+1/-0\n"}, "nonce")
 	for _, frag := range []string{`"claim"`, `"type"`, "nonfix", "transition-period risk",
-		"never force-fit", "review signal"} {
+		"never force-fit", "review signal",
+		// Undeclaredness alone makes a cohort misc — coherence must not
+		// disqualify it, or the type never fires on real PRs.
+		"can still be misc"} {
 		if !strings.Contains(p, frag) {
 			t.Errorf("prompt missing rule fragment %q", frag)
 		}
