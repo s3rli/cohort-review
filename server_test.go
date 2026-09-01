@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -187,5 +190,61 @@ func TestRenderPageEscapesHostileTitle(t *testing.T) {
 	}
 	if strings.Contains(string(page), hostile) {
 		t.Error("hostile title reached the page unescaped")
+	}
+}
+
+func TestLoadWritesRunRecord(t *testing.T) {
+	diff := "diff --git a/new.go b/new.go\n--- a/new.go\n+++ b/new.go\n@@ -1 +1 @@\n-a\n+b\n"
+	bb := fakeBitbucket(t, "T", "- bullet\n", diff)
+	defer bb.Close()
+	mpath := filepath.Join(t.TempDir(), "runs.jsonl")
+	a := &app{
+		client: NewClient("u", "p", bb.URL),
+		group: func(context.Context, string) (string, error) {
+			return `{"walkthrough": "w", "cohorts": [{"name": "N", "summary": "s", "claim": "q?", "type": "claim", "files": ["new.go"]}]}`, nil
+		},
+		budget:  defaultBudget,
+		format:  "line-by-line",
+		metrics: mpath,
+	}
+	if err := a.load(context.Background(), PRRef{Workspace: "ws", Repo: "r", Number: 1}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(mpath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r runRecord
+	if err := json.Unmarshal(bytes.TrimSpace(data), &r); err != nil {
+		t.Fatalf("runs line invalid: %v", err)
+	}
+	if r.PR != "ws/r#1" || r.Files != 1 || r.Anchor == nil || r.Anchor.DescBullets != 1 {
+		t.Errorf("%+v", r)
+	}
+	if r.GroupSecs <= 0 {
+		t.Errorf("group_secs not recorded: %+v", r)
+	}
+}
+
+func TestLoadWritesErrorRecordOnFetchFailure(t *testing.T) {
+	bb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "nope", http.StatusNotFound)
+	}))
+	defer bb.Close()
+	mpath := filepath.Join(t.TempDir(), "runs.jsonl")
+	a := &app{client: NewClient("u", "p", bb.URL), metrics: mpath}
+	if err := a.load(context.Background(), PRRef{Workspace: "ws", Repo: "r", Number: 9}); err == nil {
+		t.Fatal("expected load error")
+	}
+	data, err := os.ReadFile(mpath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r runRecord
+	if err := json.Unmarshal(bytes.TrimSpace(data), &r); err != nil {
+		t.Fatalf("runs line invalid: %v", err)
+	}
+	if r.PR != "ws/r#9" || r.Error == "" {
+		t.Errorf("failed run not recorded: %+v", r)
 	}
 }
