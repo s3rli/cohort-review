@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -118,6 +120,9 @@ func TestFoldSimilarRepTieFirstWins(t *testing.T) {
 	segs := []FileSegment{
 		mechSeg("cfg/a.yaml", 2), mechSeg("cfg/b.yaml", 2), mechSeg("cfg/c.yaml", 1),
 		mechSeg("cfg/d.yaml", 1), mechSeg("cfg/e.yaml", 1),
+		// Padding: without it the group would be most of the PR and the share
+		// guard would (correctly) refuse to fold it.
+		mechSeg("other/pad.go", 20),
 	}
 	folds := foldSegments(segs)
 	if len(folds) != 1 || folds[0].Rep != "cfg/a.yaml" {
@@ -157,5 +162,78 @@ func TestMagnitude(t *testing.T) {
 		if got := magnitude(n); got != want {
 			t.Errorf("magnitude(%d) = %d, want %d", n, got, want)
 		}
+	}
+}
+
+// churnSeg builds a modified-file segment with exactly `churn` changed lines.
+func churnSeg(p string, churn int) FileSegment {
+	return seg(p, "diff --git a/"+p+" b/"+p+"\n--- a/"+p+"\n+++ b/"+p+"\n@@ -1 +1 @@\n"+
+		strings.Repeat("+x\n", churn))
+}
+
+// TestFoldSimilarShareGuard pins the share guard against real PRs (diffstats
+// fetched 2026-09-01 from starlinglabs). The first seven groups MUST keep
+// folding — they are the mechanical fan-out the heuristic exists for. The last
+// must NOT: its members are dbfle-bson-go#14's entire implementation, so
+// "verify the representative and skim the rest" would be a claim about content
+// nobody checked. Retuning the threshold has to keep every row's verdict.
+func TestFoldSimilarShareGuard(t *testing.T) {
+	cases := []struct {
+		name     string
+		churns   []int // one churn value per file in the group
+		prChurn  int   // the whole PR's churn, group included
+		wantFold bool
+	}{
+		{"obs#1328 shippingfeewhitelist", []int{15, 15, 20, 25, 30, 35, 40, 40, 55}, 3319, true},
+		{"obs#1328 report", []int{11, 20, 30, 35, 45, 50, 68}, 3319, true},
+		{"obs#1328 operationalbill", []int{10, 20, 35, 43, 61}, 3319, true},
+		{"obs#1335 711cb small", []int{14, 20, 30, 40, 50, 55, 60, 70, 71, 85}, 5910, true},
+		{"obs#1335 711cb large", []int{107, 150, 180, 200, 220, 240, 260, 300, 316, 655}, 5910, true},
+		{"layout#523 src", []int{120, 130, 140, 148, 150, 379}, 3941, true},
+		{"layout#523 tests", []int{150, 180, 200, 250, 252, 930}, 3941, true},
+		{"dbfle#14 flebson core", []int{125, 128, 174, 269, 281, 800, 916}, 3022, false},
+	}
+	for _, c := range cases {
+		var segs []FileSegment
+		sum := 0
+		for i, churn := range c.churns {
+			segs = append(segs, churnSeg(fmt.Sprintf("pkg/f%d.go", i), churn))
+			sum += churn
+		}
+		// One file outside the group carries the rest of the PR's churn, so the
+		// guard sees the real denominator.
+		if rest := c.prChurn - sum; rest > 0 {
+			segs = append(segs, churnSeg("other/rest.txt", rest))
+		}
+		folded := false
+		for _, f := range foldSegments(segs) {
+			if f.Kind == "similar" {
+				folded = true
+			}
+		}
+		if folded != c.wantFold {
+			t.Errorf("%s: hides %d of %d lines — folded=%v, want %v",
+				c.name, sum-slices.Max(c.churns), c.prChurn, folded, c.wantFold)
+		}
+	}
+}
+
+// TestFoldSimilarShareGuardIsCumulative pins that disjoint similar groups share
+// one budget: two groups at ~40% each may not both fold, or the model is left
+// with two representatives and nothing else.
+func TestFoldSimilarShareGuardIsCumulative(t *testing.T) {
+	var segs []FileSegment
+	for i := 0; i < 5; i++ { // group A: 5 × 80 = 400 churn, hides 320
+		segs = append(segs, churnSeg(fmt.Sprintf("a/f%d.go", i), 80))
+	}
+	for i := 0; i < 5; i++ { // group B: same shape, another 400 / hides 320
+		segs = append(segs, churnSeg(fmt.Sprintf("b/f%d.go", i), 80))
+	}
+	segs = append(segs, churnSeg("other/rest.txt", 200)) // PR total 1000
+	folds := foldSegments(segs)
+	// 320 alone is 32% and folds; 640 together is 64% and must not. The first
+	// group in diff order takes the budget.
+	if len(folds) != 1 || folds[0].Rep != "a/f0.go" {
+		t.Errorf("cumulative budget not enforced (or wrong group won): %+v", folds)
 	}
 }

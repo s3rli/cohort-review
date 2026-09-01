@@ -16,6 +16,19 @@ import (
 // the model, and folding only pays off on genuine repetition.
 const minFoldSize = 5
 
+// maxSimilarSharePct caps how much of a PR's churn similar folding may hide in
+// total (disjoint groups accumulate — two folds at 49% each would starve the
+// model just as badly as one at 98%).
+// A fold compresses a repetitive tail; when a group is most of the PR it IS
+// the PR, and "verify the representative, skim the rest" becomes a claim about
+// content nobody checked. Calibrated against real PRs (see
+// TestFoldSimilarShareGuard): genuine mechanical fan-out hides 3–33% of churn,
+// while dbfle-bson-go#14 — where the group was the whole implementation —
+// hides 59%. Deletion folds are deliberately exempt: their claim is honest
+// about unread code, and a delete-only PR is legitimately ~all deletion
+// (api.shoplineapp.com#16595 folds 96.6%).
+const maxSimilarSharePct = 50
+
 // A Fold is one planned summary line: files whose hunks the model won't see.
 type Fold struct {
 	Kind    string   // "deletion" | "similar"
@@ -53,6 +66,7 @@ func foldSegments(segs []FileSegment) []Fold {
 	}
 	stats := make(map[string]stat, len(segs))
 	seen := make(map[string]int, len(segs))
+	totalChurn := 0
 	for _, s := range segs {
 		if s.Path == "" {
 			continue
@@ -60,6 +74,7 @@ func foldSegments(segs []FileSegment) []Fold {
 		seen[s.Path]++
 		st, a, d := segmentStat(s)
 		stats[s.Path] = stat{st, a, d}
+		totalChurn += a + d
 	}
 	foldable := func(p string) bool { return p != "" && seen[p] == 1 }
 
@@ -114,6 +129,7 @@ func foldSegments(segs []FileSegment) []Fold {
 		}
 		simGroups[key] = append(simGroups[key], p)
 	}
+	similarLines := 0
 	for _, k := range simOrder {
 		group := simGroups[k]
 		if len(group) < minFoldSize {
@@ -138,6 +154,13 @@ func foldSegments(segs []FileSegment) []Fold {
 			// the model at a representative with no hunks.
 			continue
 		}
+		if (similarLines+f.Lines)*100 > totalChurn*maxSimilarSharePct {
+			// This group is the body of the PR, not a tail: fold nothing and let
+			// the model read every file. Groups are visited in first-appearance
+			// order, so which one wins the budget is deterministic.
+			continue
+		}
+		similarLines += f.Lines
 		folds = append(folds, f)
 	}
 	return folds
