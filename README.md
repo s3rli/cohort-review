@@ -40,7 +40,7 @@ In the page: sidebar navigates cohorts, cohort headers collapse, toggle line-by-
 
 ## Cohort types
 
-Cohorts carry a type: **claim** (answer the one-question claim), **mechanical** / **deletion** (repeated same-shape churn — lockfiles, generated files, formatting, often folded out of the model input — or deleted files; start collapsed: verify the representative, or answer the three deletion questions), **nonfix** (review the decision not to fix), **misc** (undeclared by the description — floats first; ask the author). Untyped cohorts are grouping fallbacks.
+Cohorts carry a type: **claim** (answer the one-question claim), **mechanical** / **deletion** (repeated same-shape churn — lockfiles, generated files, formatting, often folded out of the model input — or deleted files; start collapsed: verify the representative, or answer the three deletion questions), **nonfix** (review the decision not to fix), **misc** (undeclared by the description — floats first; ask the author). Untyped cohorts are grouping fallbacks. `make golden` replays the three stored golden PRs for human comparison (see `testdata/golden/`).
 
 ## Notes
 

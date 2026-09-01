@@ -1,2 +1,5 @@
 cohort-review
 .env
+
+testdata/golden/*/
+!testdata/golden/expected/
