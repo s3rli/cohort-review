@@ -1808,6 +1808,21 @@ git commit -m "feat(anchors): in-diff anchor rule and best-effort jira issue anc
 - **Task 10** (applied in its commit): the plan's `filepath.Glob("testdata/golden/*/")` NEVER matches (Go's Glob rejects a trailing separator) — fixture discovery uses `os.ReadDir` with an `IsDir()` + `!= "expected"` filter instead; `make golden` carries `-count=1` (go test caching would otherwise replay stale model output); fetch script gained usage-on-missing-args, `--remove-on-error`, a file/line-count echo comparable to the expected headers, and an `.env` format note; missing expected files print loudly; README documents `make golden`. The test-file naming trap from Task 8 (`_js`/`_wasm` etc. suffixes are GOOS/GOARCH build constraints) generalizes: never end a Go filename in `_<goos>` or `_<goarch>`.
 - General: when a task adds a new-here function to a copied-parity file, its header enumeration must be updated in the same commit.
 
+## Misc typing: rule corrected, detection still unsolved (2026-09-02, `cddfdf3`)
+
+**Diagnosis.** The misc rule required hunks to match no declared intent **and** not clearly belong with any other cohort. The conjunction made the type unreachable for exactly the case W3 is about — a coherent change nobody announced. Direct evidence: on dbfle#14 the model wrote *"This isn't mentioned in the PR description's list of fixes…"* inside a `[claim]` cohort's claim. It had the signal and declined the type, because the change did cohere. The rule now keys on undeclaredness alone; the "belongs nowhere" case is the untyped fallback bucket's job, and that bucket already exists.
+
+**Outcome: the falsifiable target was NOT met.** The handoff predicts apigw-18 at misc ≈ 1.5% (the ~8-line `string→[]byte` refactor). Two golden runs on the new rule:
+
+| run | apigw-18 | backburner-7 | shopline-16595 |
+|---|---|---|---|
+| 1 | 4 cohorts, no misc | **false** `[misc]` on `otel_flush_timeout` (part of the declared flush intent) | 3 cohorts, correct |
+| 2 | `[misc]` on the pulsar-log cleanup (expected: `[mechanical]`) | 7 cohorts, no misc, `nonfix` ✓ | 3 cohorts, correct |
+
+Neither run reproduces the other. `string→[]byte` never fires in either — plausibly because it is threaded through declared changes rather than separable, so flagging it needs hunk-level separation of an interleaved type change.
+
+**Kept anyway, on narrower grounds:** the previous rule was provably wrong against W3, and a quality gauge that can never move is worse than one that occasionally over-reads. But **non-claim typing (`misc`, `mechanical`) is nondeterministic run to run** — that is the real open problem, and it is not a prompt-wording problem. Deliberately NOT attempted: a third reword fitted to a single non-reproducing sample (the mistake the fold guards taught). What would actually settle it: run each golden N times per variant and compare distributions — the harness supports it, it just costs LLM calls. `mechanical` under-fires for a separate reason (apigw's NIT churn is hunk-level inside a shared test file, while the rule's examples are all whole-file).
+
 ## Self-review notes
 
 - **Handoff coverage**: W1 → Tasks 3/4/5 (prompt-side folding, all paths listed, greedy budget kept as backstop, <30KB acceptance observable via the stderr/harness size print); W2 → Tasks 2/8 (Claim question-form + Type, deletion three questions, nonfix rule, badges, collapsed defaults); W3 → Task 6 (semantic misc first, fallback bucket renamed and kept last — two buckets, not merged); W4 → Task 7 (exact schema incl. error lines, `runs.jsonl`); W6 → Task 10; W5 → Task 12 (optional, as the handoff marks it); acceptance checklist → Task 11 (incl. `go vet`).
