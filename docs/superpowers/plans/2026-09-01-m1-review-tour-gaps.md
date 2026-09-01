@@ -1665,7 +1665,7 @@ The handoff's checklist verbatim. Needs `./.env` creds + logged-in `claude` CLI 
 - [ ] #18: NIT group typed `mechanical` and starts collapsed; misc ≈ the ~8-line type refactor
 - [ ] `~/.cohort-review/runs.jsonl` gains three records with `misc_lines_pct` and `anchor` fields (`tail -3 ~/.cohort-review/runs.jsonl`)
 - [ ] Optional: re-capture `docs/screenshot.png` during a golden run — the current image predates badges/claims/collapsed cohorts
-- [ ] Similar-fold observability: run once against a 100+-file same-shape PR (e.g. operational-bill-service#1328) and record group count, member counts, and the A/M status mix of members — this settles whether status-A (new) files should be excluded from similar folds and whether exact-dir keying captures the real clusters
+- [x] Similar-fold observability — **DONE 2026-09-01/02**, and it found a real defect. See "Similar-fold share guard" below. The status-A question is **closed as a non-issue**: the discriminator is not file status but how much of the PR a fold hides.
 - [ ] Degradation tests still green (LLM failure → "All changes"); each new behavior has a test
 - [ ] `go vet ./...` and `go test ./...` fully green
 - [ ] Author rating recorded per PR (edit this section): pass at ≥「跟我想的類似」on all three. A miss = tune prompt rules / `minFoldSize`, rerun that golden only — not a redesign.
@@ -1678,7 +1678,24 @@ Everything automatable ran green; only the author rating is open. Fixtures fetch
 - **backburner-7 — strong.** nonfix facade cohort detected and typed BOTH runs; worker.rb hunk-split across producer/flush cohorts; reading order 機制→接線→善後 held; `desc_chars: 0` recorded. ERRATUM inherited from the handoff: the expected file's misc line names transformer.go/basic_transformer.go — those are apigw-18 files; backburner has no such refactor. No misc cohort emerged (CHANGELOG anchored everything).
 - **apigw-18 — good with two soft spots.** Hunk-level yaml split across two cohorts worked (order_payment#1 vs #2). But across runs (5 cohorts in the harness run, 3 live — real nondeterminism) the model never emits a [mechanical] NIT cohort and never flags the string→[]byte refactor as [misc] — it absorbs both into claim cohorts with reasonable claims. `misc_lines_pct` is 0 on all runs of all PRs: misc detection has not fired in practice yet. Candidate tuning (post-rating, prompt-only): strengthen the misc rule's "not declared by the description" trigger and/or the mechanical-churn rule.
 - **runs.jsonl**: three full records, schema exact (lines 609/920/15393; anchors incl. `jira_key` PLAT-2328/SL-51617/SL-52648; types histograms; group_secs 18-40s).
-- Still open besides the rating: similar-fold observability run (#1328-shaped PR), optional screenshot refresh.
+- Still open besides the rating: optional screenshot refresh.
+
+### Similar-fold share guard (2026-09-02, `1816cc7`)
+
+Running the tool on a live non-golden PR (`dbfle-bson-go#14`, 15 files) exposed the similar-fold heuristic misfiring badly: 7 core `flebson/*.go` files shared a directory, extension and churn magnitude, so **1,777 lines — 59% of the PR, its entire implementation — were hidden behind one representative** and typed `mechanical`, which the page collapsed by default. The claim it shipped ("verify the representative; are the rest really the same shape?") was an assertion about content the tool never checked.
+
+Two guards were proposed first and **both were killed by data**, which is why the fix is neither of them:
+
+| guard | why it failed |
+|---|---|
+| cohesion ratio (max/min churn) | legit folds run 3.2×–6.2×, the misfire is 7.3× — no gap to cut in |
+| absolute member size cap | a 100-line cap kills obs#1335 (members 107–655) and both layout#523 groups — the highest-payoff folds |
+
+What separates them is **share of PR churn hidden**: legit folds 3.3 / 5.8 / 6.6 / 6.9 / 17.5 / 26.2 / 33.4%, the misfire 58.8%. Guard = similar folding may hide at most **50%** of a PR's churn, cumulative across groups (two disjoint 49% folds would starve the model as badly as one at 98%). Deletion folds are exempt by design — their claim is honest about unread code, and #16595 legitimately folds 96.6%.
+
+`TestFoldSimilarShareGuard` pins all eight real groups as a fixture; retuning must keep every verdict. Verified after the change: dbfle#14 folds nothing and regroups into 4 clean claim cohorts with tests paired to their subject (was 5 incl. the false mechanical); all three goldens pass with #16595 still folding 14,877 lines and backburner#7 still detecting `nonfix`.
+
+Known limits: 7 positive vs 1 negative sample; the 33%→59% gap is real but single-sourced. Failure mode is under-folding (bigger prompt, greedy budget absorbs it) — the direction `fold.go` says to err in. Unrelated observation from the same run: on one apigw-18 pass the model hunk-split a test file and left 4 hunks unclaimed; repair swept them into the fallback bucket, partition intact — the safety net doing real work.
 - [ ] Wrap up via superpowers:finishing-a-development-branch (merge/PR decision belongs to the author)
 
 ---
