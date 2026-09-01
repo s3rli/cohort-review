@@ -34,8 +34,13 @@ Fetches the diff, groups it into cohorts (~10–60s), prints a `http://127.0.0.1
 | `--model` | `sonnet` | claude model for grouping |
 | `--budget` | `204800` | max chars of diff hunks sent to the model |
 | `--format` | `line-by-line` | initial layout, or `side-by-side` |
+| `--metrics` | `~/.cohort-review/runs.jsonl` | append a JSON record per load attempt (misc_lines_pct, folded_lines_pct, anchor stats, cohort types) to `<path>`; defaults to `~/.cohort-review/runs.jsonl`, empty disables |
 
 In the page: sidebar navigates cohorts, cohort headers collapse, toggle line-by-line ↔ side-by-side, `◐ theme` switches dark/light. Paste another PR URL in the header's "switch PR" box to load it in place (re-groups, ~10–60s).
+
+## Cohort types
+
+Cohorts carry a type: **claim** (answer the one-question claim), **mechanical** / **deletion** (repeated same-shape churn — lockfiles, generated files, formatting, often folded out of the model input — or deleted files; start collapsed: verify the representative, or answer the three deletion questions), **nonfix** (review the decision not to fix), **misc** (undeclared by the description — floats first; ask the author). Untyped cohorts are grouping fallbacks.
 
 ## Notes
 
@@ -43,4 +48,5 @@ In the page: sidebar navigates cohorts, cohort headers collapse, toggle line-by-
 - A mixed-concern file can be split across cohorts by hunk — the sidebar shows a `(k/M)` hunk count and the full diff still renders exactly once.
 - Diffs over the budget still group **all** files — overflow files' hunks are trimmed to their leading hunks (or omitted entirely) in the model input; the rendered page always shows the full diff.
 - Server binds 127.0.0.1 only.
+- Repeated churn is folded out of the model input — piles of deleted files, and ≥5 same-directory/same-extension/same-size files reduced to one representative — so the model sees a summary line instead of their hunks. The rendered page always shows the full diff.
 - Small pieces are copied from the internal `code-review-agent` repo (marked with provenance headers) pending same-source convergence.
