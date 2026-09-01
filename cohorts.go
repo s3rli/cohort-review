@@ -314,8 +314,8 @@ func groupCohorts(ctx context.Context, run groupFunc, pr PullRequest, segs []Fil
 	in := buildPromptInput(segs, folds, budget)
 	in.Title, in.Description = pr.Title, pr.Description
 	prompt := buildCohortPrompt(in, NewNonce())
-	fmt.Fprintf(os.Stderr, "cohort-review: prompt hunks %d KB (%d lines folded)\n",
-		len(in.Hunks)/1024, foldedLines)
+	fmt.Fprintf(os.Stderr, "cohort-review: prompt hunks %d KB (%d lines folded, %d omitted, %d truncated)\n",
+		len(in.Hunks)/1024, foldedLines, len(in.Omitted), len(in.Truncated))
 	for attempt := 1; attempt <= 2; attempt++ {
 		out, err := run(ctx, prompt)
 		if err == nil {
