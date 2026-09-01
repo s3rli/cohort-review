@@ -1,6 +1,6 @@
 // Adapted from code-review-agent internal/agent/claude.go — keep parity for
 // same-source convergence. Collapsed to a single grouping call: hardcoded flag
-// set, no telemetry, no tool scopes.
+// set, no telemetry, no tool scopes, array-envelope unwrap for CLI 2.x.
 package main
 
 import (
@@ -61,7 +61,10 @@ func claudeFailure(err error, stdout, stderr []byte) error {
 }
 
 // extractClaudeResult unwraps the assistant text from the Claude CLI's
-// --output-format json envelope ({"result": "...", ...}). Idempotent on
+// --output-format json envelope. Older CLIs emit a single {"result": "...", ...}
+// object; 2.x emits an ARRAY of message objects whose "type":"result" element
+// carries the same field (observed on 2.1.252) — a deliberate divergence from
+// code-review-agent, which predates the array envelope. Idempotent on
 // non-envelope output.
 func extractClaudeResult(output []byte) string {
 	var obj struct {
@@ -69,6 +72,18 @@ func extractClaudeResult(output []byte) string {
 	}
 	if err := json.Unmarshal(output, &obj); err == nil && obj.Result != "" {
 		return obj.Result
+	}
+	var arr []struct {
+		Type   string `json:"type"`
+		Result string `json:"result"`
+	}
+	if err := json.Unmarshal(output, &arr); err == nil {
+		// The result element is last in practice; scan backwards to be safe.
+		for i := len(arr) - 1; i >= 0; i-- {
+			if arr[i].Type == "result" && arr[i].Result != "" {
+				return arr[i].Result
+			}
+		}
 	}
 	return string(output)
 }
