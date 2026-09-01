@@ -5,4 +5,4 @@
 3. [deletion] 217 檔 vendored Karate suite (14,877 行) — claim 三問
 
 驗收重點: 摺疊生效 — 送模型的 hunk 內容 < 30KB (prompt 大小印在 harness 輸出);
-217 刪除檔歸一個 deletion cohort; omitted 檔數應為 0 (unfolded 時 ~157).
+217 刪除檔歸一個 deletion cohort; omitted 檔數應為 0 (unfolded 時 106).
