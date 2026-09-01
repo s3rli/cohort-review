@@ -1,147 +1,350 @@
 <!doctype html>
-<html>
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.Title}} — cohort review</title>
+<!-- Restore the saved theme before first paint, so a light-mode user doesn't
+     get a dark flash on every load. -->
+<script>{ const t = localStorage.getItem("theme"); if (t) document.documentElement.setAttribute("data-theme", t); }</script>
+<link rel="stylesheet" href="/assets/ibm-plex.css">
 <link rel="stylesheet" href="/assets/diff2html.min.css">
-<link rel="stylesheet" href="/assets/github.min.css" id="hl-light">
-<link rel="stylesheet" href="/assets/github-dark.min.css" id="hl-dark" disabled>
+<link rel="stylesheet" href="/assets/github.min.css" id="hl-light" disabled>
+<link rel="stylesheet" href="/assets/github-dark.min.css" id="hl-dark">
 <script src="/assets/diff2html.min.js"></script>
 <script src="/assets/diff2html-ui.min.js"></script>
 <style>
-  /* Adapted from the "Cohort Review (diff2html)" prototype artifact. */
+  /* Styled after the "Change Stack Viewer" design canvas: a dark, layered
+     review shell in IBM Plex. Dark is the default because the design has no
+     light counterpart; the toggle's light palette is derived from it. */
   :root {
-    --bg:#f6f7f9; --panel:#fff; --sidebar:#f0f2f5; --border:#e3e6ec;
-    --ink:#1a1f28; --ink-2:#48505d; --muted:#79828f; --accent:#4b5bd0; --accent-soft:#ecefff;
-    --add-ink:#1a7f37; --del-ink:#c0362c;
-    --mono: ui-monospace,"SF Mono","SFMono-Regular",Menlo,Consolas,monospace;
-    --sans: system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    color-scheme: dark;
+    --accent:#7c3aed; --accent-ink:#fff; --accent-soft:rgba(124,58,237,.16);
+
+    --bg:#0d0d0f;       /* header + page ground */
+    --canvas:#121215;   /* main column */
+    --rail:#0b0b0d;     /* sidebar */
+    --rail-hover:#141418;
+    --card:#0f0f12;     /* diff card body */
+    --panel:#17171b;    /* controls, card headers, hunk bars */
+    --panel-2:#1e1e23;  /* hover / pressed */
+    --panel-3:#1b1b21;  /* selected row */
+
+    --line:#232329; --line-2:#26262c; --line-3:#2b2b32;
+    --line-4:#1e1e23; --line-5:#1c1c21; --line-hover:#3a3a43;
+
+    --ink:#e7e7ea; --ink-hi:#f2f2f4; --ink-2:#b9b9c2; --ink-3:#9a9aa3;
+    --muted:#8c8c95; --muted-2:#7d7d87; --faint:#6a6a74; --faintest:#4d4d55;
+
+    --chip-bg:#1c1c21; --chip-line:#2a2a31; --chip-ink:#a3a3ac;
+
+    --gutter:#101013; --gutter-ink:#5f5f69; --code-ink:#b9b9c2;
+    --add:#3fb950; --add-num:#7ee787; --add-code:#d7e6d9;
+    --add-bg:rgba(63,185,80,.13); --add-bg-2:rgba(63,185,80,.09); --add-hi:rgba(63,185,80,.3);
+    --del:#f85149; --del-num:#ffa198; --del-code:#e8d8d6;
+    --del-bg:rgba(248,81,73,.13); --del-bg-2:rgba(248,81,73,.09); --del-hi:rgba(248,81,73,.3);
+    --stat-add:#56d364; --stat-del:#ff7b72;
+    --chg-add:var(--add-bg-2); --chg-del:var(--del-bg-2); --chg-ink:var(--chip-ink);
+
+    --link:#b892ff; --link-h:#d3bcff;
+    --hatch:repeating-linear-gradient(45deg,rgba(255,255,255,.028) 0 1px,transparent 1px 7px);
+
+    --sans:'IBM Plex Sans',system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,"SF Mono","SFMono-Regular",Menlo,Consolas,monospace;
   }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#0c0f14; --panel:#12161d; --sidebar:#0e1218; --border:#232a34;
-      --ink:#e6ecf3; --ink-2:#aeb8c6; --muted:#737d8c; --accent:#7d8bff; --accent-soft:#1a2036;
-      --add-ink:#4ac26b; --del-ink:#f0655a; }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --accent:#6d28d9; --accent-ink:#fff; --accent-soft:rgba(109,40,217,.1);
+
+    --bg:#fff; --canvas:#f7f7f9; --rail:#fbfbfc; --rail-hover:#f1f1f4;
+    --card:#fff; --panel:#f2f2f5; --panel-2:#e9e9ee; --panel-3:#f0ecfb;
+
+    --line:#e4e4ea; --line-2:#e4e4ea; --line-3:#d8d8e0;
+    --line-4:#ededf1; --line-5:#ededf1; --line-hover:#c3c3cd;
+
+    --ink:#1c1c22; --ink-hi:#0e0e12; --ink-2:#3f3f4a; --ink-3:#5f5f6c;
+    --muted:#71717f; --muted-2:#82828f; --faint:#9a9aa6; --faintest:#c2c2cc;
+
+    --chip-bg:#f2f2f5; --chip-line:#e0e0e7; --chip-ink:#5f5f6c;
+
+    --gutter:#f6f6f9; --gutter-ink:#9a9aa6; --code-ink:#26262e;
+    --add:#1f9c4d; --add-num:#146c31; --add-code:#14351f;
+    --add-bg:rgba(31,156,77,.15); --add-bg-2:rgba(31,156,77,.08); --add-hi:rgba(31,156,77,.3);
+    --del:#d1332b; --del-num:#a11b16; --del-code:#43140f;
+    --del-bg:rgba(209,51,43,.13); --del-bg-2:rgba(209,51,43,.07); --del-hi:rgba(209,51,43,.28);
+    --stat-add:#1a7f37; --stat-del:#c0362c;
+    --chg-add:var(--add-bg-2); --chg-del:var(--del-bg-2); --chg-ink:var(--chip-ink);
+
+    --link:#6d28d9; --link-h:#5b21b6;
+    --hatch:repeating-linear-gradient(45deg,rgba(0,0,0,.04) 0 1px,transparent 1px 7px);
   }
-  :root[data-theme="light"] { --bg:#f6f7f9;--panel:#fff;--sidebar:#f0f2f5;--border:#e3e6ec;
-    --ink:#1a1f28;--ink-2:#48505d;--muted:#79828f;--accent:#4b5bd0;--accent-soft:#ecefff;--add-ink:#1a7f37;--del-ink:#c0362c; }
-  :root[data-theme="dark"] { --bg:#0c0f14;--panel:#12161d;--sidebar:#0e1218;--border:#232a34;
-    --ink:#e6ecf3;--ink-2:#aeb8c6;--muted:#737d8c;--accent:#7d8bff;--accent-soft:#1a2036;--add-ink:#4ac26b;--del-ink:#f0655a; }
+
+  /* diff2html is re-skinned through its own custom properties rather than by
+     out-specifying its selectors. applyDark() toggles .d2h-dark-color-scheme,
+     which is what picks the --d2h-dark-* set over the base set. */
+  :root {
+    --d2h-dark-bg-color:var(--gutter); --d2h-dark-color:var(--code-ink);
+    --d2h-dark-border-color:var(--line-2); --d2h-dark-dim-color:var(--gutter-ink);
+    --d2h-dark-line-border-color:var(--line-5);
+    --d2h-dark-file-header-bg-color:var(--panel); --d2h-dark-file-header-border-color:var(--line-2);
+    --d2h-dark-empty-placeholder-bg-color:var(--gutter); --d2h-dark-empty-placeholder-border-color:var(--line-2);
+    --d2h-dark-selected-color:var(--accent-soft);
+    --d2h-dark-ins-bg-color:var(--add-bg-2); --d2h-dark-ins-border-color:var(--add);
+    --d2h-dark-ins-highlight-bg-color:var(--add-hi); --d2h-dark-ins-label-color:var(--stat-add);
+    --d2h-dark-del-bg-color:var(--del-bg-2); --d2h-dark-del-border-color:var(--del);
+    --d2h-dark-del-highlight-bg-color:var(--del-hi); --d2h-dark-del-label-color:var(--stat-del);
+    --d2h-dark-info-bg-color:var(--panel); --d2h-dark-info-border-color:var(--line-2);
+    --d2h-dark-change-ins-color:var(--chg-add); --d2h-dark-change-del-color:var(--chg-del);
+    --d2h-dark-change-label-color:var(--chg-ink);
+
+    --d2h-bg-color:var(--gutter); --d2h-border-color:var(--line-2);
+    --d2h-dim-color:var(--gutter-ink); --d2h-line-border-color:var(--line-5);
+    --d2h-file-header-bg-color:var(--panel); --d2h-file-header-border-color:var(--line-2);
+    --d2h-empty-placeholder-bg-color:var(--gutter); --d2h-empty-placeholder-border-color:var(--line-2);
+    --d2h-selected-color:var(--accent-soft);
+    --d2h-ins-bg-color:var(--add-bg-2); --d2h-ins-border-color:var(--add);
+    --d2h-ins-highlight-bg-color:var(--add-hi); --d2h-ins-label-color:var(--stat-add);
+    --d2h-del-bg-color:var(--del-bg-2); --d2h-del-border-color:var(--del);
+    --d2h-del-highlight-bg-color:var(--del-hi); --d2h-del-label-color:var(--stat-del);
+    --d2h-info-bg-color:var(--panel); --d2h-info-border-color:var(--line-2);
+    --d2h-change-ins-color:var(--chg-add); --d2h-change-del-color:var(--chg-del);
+    --d2h-change-label-color:var(--chg-ink);
+  }
 
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; }
-  body { background: var(--bg); color: var(--ink); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
-  .app { display: grid; grid-template-columns: var(--sidebar-w, 288px) 1fr; min-height: 100vh; }
-  .sidebar { background: var(--sidebar); border-right: 1px solid var(--border); position: sticky; top: 0;
-    height: 100vh; overflow-y: auto; padding: 18px 14px; }
-  .rsz { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; }
+  html, body { margin: 0; }
+  /* The shell owns the viewport: header pinned, sidebar and main scroll
+     independently. IntersectionObserver still fires against the viewport, so
+     lazy cohort rendering is unaffected. */
+  body { height: 100vh; overflow: hidden; display: flex; flex-direction: column;
+    background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px;
+    -webkit-font-smoothing: antialiased; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--canvas); }
+  ::-webkit-scrollbar-thumb { background: var(--line-3); border-radius: 6px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--line-hover); }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { color: var(--link-h); }
+
+  .btn { display: inline-flex; align-items: center; gap: 8px; background: var(--panel);
+    border: 1px solid var(--line-3); color: var(--ink); font-family: var(--sans); font-size: 13px;
+    font-weight: 500; padding: 8px 13px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+  .btn:hover { background: var(--panel-2); border-color: var(--line-hover); color: var(--ink); }
+  .btn:disabled { color: var(--muted-2); cursor: wait; }
+  .icon-btn { width: 34px; height: 34px; padding: 0; display: grid; place-items: center;
+    background: var(--panel); border: 1px solid var(--line-3); border-radius: 8px;
+    color: var(--ink-3); cursor: pointer; flex: none; }
+  .icon-btn:hover { background: var(--panel-2); border-color: var(--line-hover); color: var(--ink); }
+  .chip { padding: 3px 8px; border-radius: 6px; background: var(--chip-bg);
+    border: 1px solid var(--chip-line); color: var(--chip-ink); font-size: 11.5px;
+    font-family: var(--mono); white-space: nowrap; }
+  .label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+
+  .topbar { flex: none; display: flex; align-items: flex-start; gap: 16px; padding: 14px 18px 12px;
+    background: var(--bg); border-bottom: 1px solid var(--line); }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px 5px 9px;
+    border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 12.5px;
+    font-weight: 600; flex: none; margin-top: 2px; }
+  .tb-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .tb-title { margin: 0; font-size: 16.5px; font-weight: 600; letter-spacing: -.01em;
+    color: var(--ink-hi); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tb-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-family: var(--mono);
+    font-size: 12.5px; color: var(--muted); }
+  .tb-meta .sep { color: var(--faintest); }
+  .tb-meta .repo { display: flex; align-items: center; gap: 6px; }
+  .tb-meta .repo i { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--muted-2); }
+  .tb-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+  .loadf { display: flex; gap: 6px; }
+  .loadf input { font-family: var(--mono); font-size: 12.5px; width: 244px; padding: 8px 12px;
+    background: var(--panel); color: var(--ink); border: 1px solid var(--line-3); border-radius: 8px; }
+  .loadf input::placeholder { color: var(--muted-2); }
+  .loadf input:focus { outline: none; border-color: var(--accent); }
+
+  .app { flex: 1; min-height: 0; display: flex; position: relative; }
+  .sidebar { width: var(--sidebar-w, 288px); flex: none; background: var(--rail);
+    border-right: 1px solid var(--line); display: flex; flex-direction: column; overflow: hidden; }
+  .side-head { display: flex; align-items: center; gap: 8px; padding: 14px 14px 8px; }
+  .side-head .cnt { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted);
+    background: var(--panel); border: 1px solid var(--line-3); border-radius: 999px; padding: 2px 8px; }
+  .side-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 12px; }
+  .side-foot { flex: none; border-top: 1px solid var(--line-4); padding: 12px 16px 14px;
+    display: flex; flex-direction: column; gap: 6px; }
+  .side-foot .line { font-family: var(--mono); font-size: 11.5px; color: var(--muted-2); }
+  /* Absolutely positioned over the column edge so it doesn't scroll with
+     either pane. */
+  .rsz { position: absolute; top: 0; left: calc(var(--sidebar-w, 288px) - 3px); width: 6px;
+    height: 100%; cursor: col-resize; z-index: 5; }
   .rsz:hover { background: var(--accent-soft); }
   body.resizing { cursor: col-resize; user-select: none; }
-  .brand { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
-    color: var(--accent); font-weight: 700; margin-bottom: 4px; }
-  .pr-t { font-size: 14.5px; font-weight: 650; line-height: 1.3; margin-bottom: 16px; }
-  .nav-coh { margin-bottom: 6px; }
-  .nch { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 7px; cursor: pointer;
-    font-size: 13px; font-weight: 600; }
-  .nch:hover { background: var(--accent-soft); }
-  .nch .swatch { width: 9px; height: 9px; border-radius: 3px; flex: none; }
-  .nch .cnt { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted);
-    background: var(--panel); border: 1px solid var(--border); border-radius: 20px; padding: 1px 7px; }
-  .nav-files { list-style: none; margin: 2px 0 8px; padding: 0 0 0 26px; }
-  .nav-files li { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); padding: 3px 6px;
-    border-radius: 5px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+
+  .nav-coh { margin-bottom: 2px; }
+  .nch { display: flex; flex-direction: column; gap: 8px; padding: 11px 12px; border-radius: 9px;
+    cursor: pointer; border: 1px solid transparent; }
+  .nch:hover { background: var(--rail-hover); }
+  .nch.on { background: var(--panel-3); border-color: var(--line-3);
+    box-shadow: inset 2px 0 0 var(--coh); }
+  .nch-top { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+  .nch-n { width: 12px; flex: none; font-family: var(--mono); font-size: 12px; color: var(--faint); }
+  .nch.on .nch-n { color: var(--coh); }
+  .nch-t { font-size: 13.5px; font-weight: 500; color: var(--ink-2); line-height: 1.35;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nch.on .nch-t { font-weight: 600; color: var(--ink-hi); }
+  .nch-chips { display: flex; align-items: center; gap: 8px; padding-left: 22px; }
+  .nch-chips .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--coh);
+    margin-left: auto; flex: none; }
+  .nav-files { list-style: none; margin: 0 0 6px; padding: 0 0 0 34px; }
+  .nav-files li { font-family: var(--mono); font-size: 11.5px; color: var(--muted); padding: 4px 8px;
+    border-radius: 6px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     direction: rtl; text-align: left; }
-  .nav-files li:hover { background: var(--accent-soft); color: var(--accent); }
+  .nav-files li:hover { background: var(--panel-2); color: var(--ink); }
   .nav-files li span { direction: ltr; unicode-bidi: bidi-override; }
 
-  /* Diffs use the full viewport in both layouts; only the header prose stays
-     capped for readability. */
-  main { min-width: 0; padding: 24px 28px 80px; }
-  .top { margin-bottom: 20px; max-width: 1064px; }
-  h1 { font-size: 22px; line-height: 1.2; letter-spacing: -.01em; margin: 8px 0 12px; font-weight: 700; }
-  .walk { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent);
-    border-radius: 10px; padding: 14px 16px; font-size: 14px; color: var(--ink-2); line-height: 1.55; }
-  .controls { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 12px; align-items: center;
-    font-family: var(--mono); font-size: 12px; color: var(--muted); }
-  .controls a { color: var(--accent); text-decoration: none; }
-  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 20px; overflow: hidden; }
-  .seg button { font-family: var(--mono); font-size: 11.5px; border: 0; background: var(--panel); color: var(--ink-2);
-    padding: 4px 12px; cursor: pointer; }
-  .seg button.on { background: var(--accent); color: #fff; }
-  .loadf { display: inline-flex; gap: 6px; margin-left: auto; }
-  .loadf input { font-family: var(--mono); font-size: 11.5px; width: 260px; padding: 4px 10px;
-    background: var(--panel); color: var(--ink); border: 1px solid var(--border); border-radius: 20px; }
-  .loadf input::placeholder { color: var(--muted); }
-  .loadf button { font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--border); border-radius: 20px;
-    background: var(--panel); color: var(--ink-2); padding: 4px 12px; cursor: pointer; }
-  .loadf button:disabled { color: var(--muted); cursor: wait; }
+  main { flex: 1; min-width: 0; overflow-y: auto; background: var(--canvas); }
+  .intro { padding: 26px 30px 0; }
+  .intro .label { margin-bottom: 10px; }
+  .walk { margin: 0; font-size: 14.5px; line-height: 1.55; color: var(--ink-3); max-width: 78ch;
+    text-wrap: pretty; }
+  .toolbar { display: flex; align-items: center; gap: 10px; padding: 22px 30px 20px; }
+  .seg { display: flex; align-items: stretch; border: 1px solid var(--line-3); border-radius: 9px;
+    overflow: hidden; background: var(--panel); }
+  .seg button { background: none; border: 0; color: var(--muted); font-family: var(--mono);
+    font-size: 12.5px; font-weight: 500; padding: 9px 14px; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--line-3); }
+  .seg button:hover { background: var(--panel-2); color: var(--ink); }
+  .seg button.on { background: var(--accent); color: var(--accent-ink); }
 
-  .cohort { margin-top: 24px; scroll-margin-top: 12px; }
-  .coh-head { display: flex; align-items: center; gap: 10px; padding: 8px 0 4px; cursor: pointer; }
-  .coh-head .swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
-  .coh-head h2 { font-size: 16.5px; margin: 0; font-weight: 680; letter-spacing: -.01em; }
-  .coh-head .stat { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--muted);
-    display: flex; gap: 8px; align-items: center; }
-  .coh-head .chev { color: var(--muted); font-size: 12px; transition: transform .15s; }
+  .cohort { padding: 0 30px; margin-bottom: 34px; scroll-margin-top: 16px; }
+  .coh-head { display: flex; align-items: center; gap: 11px; cursor: pointer; }
+  .coh-n { flex: none; font-family: var(--mono); font-size: 13px; color: var(--coh); }
+  .coh-head h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.015em;
+    color: var(--ink-hi); }
+  .coh-stat { margin-left: auto; display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+  .coh-stat .chev { color: var(--muted-2); font-size: 11px; transition: transform .15s; }
   .cohort.collapsed .chev { transform: rotate(-90deg); }
-  .coh-sum { font-size: 13.5px; color: var(--ink-2); margin: 0 0 12px 21px; line-height: 1.5; }
+  .coh-sum { margin: 9px 0 16px; padding-left: 23px; font-size: 14.5px; line-height: 1.55;
+    color: var(--ink-3); max-width: 78ch; text-wrap: pretty; }
   .cohort.collapsed .coh-body { display: none; }
-  .d2h-wrap { margin-bottom: 8px; }
+  .coh-pending { color: var(--muted); font-family: var(--mono); font-size: 12px; padding: 16px 4px; }
+
+  /* Structural diff2html overrides — the parts its custom properties don't
+     reach (metrics, radii, and the split between gutter and code tints). */
+  .d2h-wrap .d2h-file-wrapper { background: var(--card); border: 1px solid var(--line-2);
+    border-radius: 12px; overflow: hidden; margin-bottom: 14px; scroll-margin-top: 16px;
+    /* content-visibility lets the browser skip layout/paint for file cards that
+       are scrolled off-screen — cheap virtualization for a long diff. The
+       intrinsic-size is a rough placeholder so the scrollbar stays sane. */
+    content-visibility: auto; contain-intrinsic-size: 0 320px; }
+  .d2h-wrap .d2h-file-header { height: auto; min-height: 45px; padding: 10px 14px; gap: 10px;
+    align-items: center; font-family: var(--sans); }
+  .d2h-wrap .d2h-file-name-wrapper { align-items: center; gap: 9px; font-size: 13.5px;
+    color: var(--muted); min-width: 0; }
+  .d2h-wrap .d2h-file-name { font-family: var(--mono); font-size: 13.5px; color: var(--ink-hi); }
+  .d2h-wrap .d2h-icon { margin-right: 0; flex: none; }
+  .d2h-wrap .d2h-tag { font-family: var(--mono); font-size: 10.5px; line-height: 1.5;
+    padding: 1px 7px; border-radius: 6px; background: var(--chip-bg); margin-left: 2px; flex: none; }
+  .d2h-wrap .d2h-file-stats { gap: 7px; font-family: var(--mono); font-size: 12.5px; flex: none; }
+  .d2h-wrap .d2h-lines-added, .d2h-wrap .d2h-lines-deleted { border: 0; border-radius: 0;
+    padding: 0; margin: 0; }
+  .d2h-wrap .d2h-file-collapse { display: flex; flex: none; gap: 7px; padding: 6px 12px;
+    border-radius: 8px; border: 1px solid var(--line-3); background: var(--panel-2);
+    color: var(--ink-2); font-family: var(--sans); font-size: 12.5px; font-weight: 500; }
+  .d2h-wrap .d2h-file-collapse:hover { border-color: var(--line-hover); }
+  .d2h-wrap .d2h-file-collapse-input { accent-color: var(--accent); margin: 0; }
+  .d2h-wrap .d2h-diff-table { font-family: var(--mono); font-size: 12.75px; line-height: 22px; }
+  /* Long lines have to be reachable: the card clips (for its radius), so the
+     code body is what scrolls. */
+  .d2h-wrap .d2h-file-diff { overflow-x: auto; }
+  .d2h-wrap .d2h-info { padding-left: 4px; font-family: var(--mono); font-size: 12.5px; }
+  /* The design tints the line-number gutter harder than the code cell and
+     marks the change with a 3px edge, so the two halves need separate rules. */
+  .d2h-wrap .d2h-code-linenumber.d2h-ins, .d2h-wrap .d2h-code-side-linenumber.d2h-ins {
+    background: var(--add-bg); color: var(--add-num); border-left: 3px solid var(--add); }
+  .d2h-wrap .d2h-code-linenumber.d2h-del, .d2h-wrap .d2h-code-side-linenumber.d2h-del {
+    background: var(--del-bg); color: var(--del-num); border-left: 3px solid var(--del); }
+  .d2h-wrap td.d2h-ins .d2h-code-line-ctn, .d2h-wrap td.d2h-ins .d2h-code-line-prefix { color: var(--add-code); }
+  .d2h-wrap td.d2h-del .d2h-code-line-ctn, .d2h-wrap td.d2h-del .d2h-code-line-prefix { color: var(--del-code); }
+  .d2h-wrap .d2h-file-diff .d2h-code-linenumber.d2h-ins.d2h-change,
+  .d2h-wrap .d2h-files-diff .d2h-code-side-linenumber.d2h-ins.d2h-change { background: var(--add-bg); }
+  .d2h-wrap .d2h-file-diff .d2h-code-linenumber.d2h-del.d2h-change,
+  .d2h-wrap .d2h-files-diff .d2h-code-side-linenumber.d2h-del.d2h-change { background: var(--del-bg); }
+  .d2h-wrap .d2h-files-diff .d2h-emptyplaceholder,
+  .d2h-wrap .d2h-files-diff .d2h-code-side-emptyplaceholder { background-image: var(--hatch); }
+  .d2h-wrap .d2h-file-side-diff + .d2h-file-side-diff { border-left: 1px solid var(--line-2); }
   /* The hljs themes paint a block background on every highlighted element,
      which fights the diff's added/removed row colors — highlighting must
      only color tokens. */
   .d2h-wrap .hljs { background: transparent; padding: 0; }
-  /* content-visibility lets the browser skip layout/paint for file cards that
-     are scrolled off-screen — cheap virtualization for a long diff. The
-     intrinsic-size is a rough placeholder so the scrollbar stays sane. */
-  .d2h-wrap .d2h-file-wrapper { border-radius: 9px; overflow: hidden; margin-bottom: 12px; scroll-margin-top: 12px;
-    content-visibility: auto; contain-intrinsic-size: 0 320px; }
+
   /* Large/generated files (lockfiles, minified assets, huge hunks) render as a
      placeholder card so one blob can't blow up the page; the expensive
-     diff2html draw + highlight runs only if the user expands it. */
-  .cr-file { scroll-margin-top: 12px; }
-  .cr-big { background: var(--panel); border: 1px solid var(--border); border-radius: 9px; overflow: hidden;
-    margin-bottom: 12px; }
-  .cr-big .cr-name { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--ink-2);
-    padding: 9px 14px; }
-  .cr-show { display: block; width: 100%; text-align: left; cursor: pointer; font-family: var(--mono);
-    font-size: 12px; color: var(--accent); background: var(--panel); border: 0;
-    border-top: 1px solid var(--border); padding: 9px 14px; }
-  .cr-show:hover { background: var(--accent-soft); }
-  .coh-pending { color: var(--muted); font-family: var(--mono); font-size: 12px; padding: 16px 4px; }
+     diff2html draw + highlight pass runs only if the user expands it. */
+  .cr-file { scroll-margin-top: 16px; }
+  .cr-big { background: var(--card); border: 1px solid var(--line-2); border-radius: 12px;
+    overflow: hidden; margin-bottom: 14px; }
+  .cr-big .cr-name { display: flex; align-items: center; gap: 9px; min-height: 45px;
+    padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line-2);
+    font-family: var(--mono); font-size: 13.5px; color: var(--ink-hi); }
+  .cr-show { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+    cursor: pointer; font-family: var(--mono); font-size: 12.5px; color: var(--link);
+    background: none; border: 0; padding: 12px 14px; }
+  .cr-show:hover { background: var(--panel); }
+  .loading { color: var(--muted); font-family: var(--mono); font-size: 13px; padding: 40px 30px; }
 
-  .theme-btn { position: fixed; top: 16px; right: 18px; z-index: 5; font-family: var(--mono); font-size: 11px;
-    background: var(--panel); color: var(--ink-2); border: 1px solid var(--border); border-radius: 20px;
-    padding: 5px 12px; cursor: pointer; }
-  .loading { color: var(--muted); font-family: var(--mono); font-size: 13px; padding: 40px 0; }
-  @media (max-width: 820px) { .app { grid-template-columns: 1fr; } .sidebar { display: none; } main { padding: 20px 14px 60px; } }
+  @media (max-width: 900px) {
+    .app { display: block; overflow-y: auto; }
+    body { height: auto; overflow: visible; }
+    .sidebar, .rsz { display: none; }
+    main { overflow: visible; }
+    .topbar { flex-wrap: wrap; }
+    .cohort, .toolbar, .intro { padding-left: 16px; padding-right: 16px; }
+  }
 </style>
 </head>
 <body>
 
-<button class="theme-btn" onclick="toggleTheme()">◐ theme</button>
+<header class="topbar">
+  <span class="pill">
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><circle cx="3" cy="3" r="2" stroke="currentColor" stroke-width="1.4"></circle><circle cx="3" cy="9.5" r="1.6" fill="currentColor"></circle><path d="M3 5v2.4M5 3h3.2a1.6 1.6 0 0 1 1.6 1.6V8" stroke="currentColor" stroke-width="1.3"></path></svg>
+    Local
+  </span>
+  <div class="tb-main">
+    <h1 class="tb-title" id="pr-title"></h1>
+    <div class="tb-meta" id="meta"></div>
+  </div>
+  <div class="tb-actions">
+    <a class="btn" id="pr-link" target="_blank" rel="noopener" hidden>view on Bitbucket ↗</a>
+    <form class="loadf" action="/load"
+      onsubmit="const b=this.querySelector('button'); b.disabled=true; b.textContent='grouping…';">
+      <input name="pr" required placeholder="switch PR: paste bitbucket URL">
+      <button class="btn">load</button>
+    </form>
+    <button class="icon-btn" onclick="toggleTheme()" title="toggle theme" aria-label="toggle theme">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"></circle><path d="M8 2a6 6 0 0 1 0 12Z" fill="currentColor"></path></svg>
+    </button>
+  </div>
+</header>
+
 <div class="app">
   <aside class="sidebar">
-    <div class="rsz" id="rsz" title="drag to resize"></div>
-    <div class="brand">Cohort Review</div>
-    <div class="pr-t" id="pr-title"></div>
-    <nav id="nav"></nav>
+    <div class="side-head">
+      <span class="label">Cohorts</span>
+      <span class="cnt" id="coh-count"></span>
+    </div>
+    <div class="side-scroll"><nav id="nav"></nav></div>
+    <div class="side-foot">
+      <span class="label">Rendered by</span>
+      <span class="line">diff2html · localhost only</span>
+    </div>
   </aside>
-  <main>
-    <div class="top">
-      <div class="brand">Local · cohort-grouped diff · rendered by diff2html</div>
-      <h1 id="h-title"></h1>
-      <div class="walk" id="walk" hidden></div>
-      <div class="controls">
-        <span id="meta"></span>
-        <a id="pr-link" target="_blank" rel="noopener" hidden>view on Bitbucket ↗</a>
-        <span class="seg"><button id="ll" onclick="setFmt('line-by-line')">line-by-line</button><button id="sbs" onclick="setFmt('side-by-side')">side-by-side</button></span>
-        <form class="loadf" action="/load"
-          onsubmit="const b=this.querySelector('button'); b.disabled=true; b.textContent='grouping…';">
-          <input name="pr" required placeholder="switch PR: paste bitbucket URL">
-          <button>load</button>
-        </form>
-      </div>
+  <div class="rsz" id="rsz" title="drag to resize"></div>
+  <main id="main">
+    <div class="intro" id="intro" hidden>
+      <div class="label">Walkthrough</div>
+      <p class="walk" id="walk"></p>
+    </div>
+    <div class="toolbar">
+      <span class="seg"><button id="ll" onclick="setFmt('line-by-line')">line-by-line</button><button id="sbs" onclick="setFmt('side-by-side')">side-by-side</button></span>
     </div>
     <div id="sections"><div class="loading">loading diff…</div></div>
   </main>
@@ -151,7 +354,7 @@
 <script>
   // Glue adapted from the prototype artifact; data comes from PAGE and the
   // diff from /diff.txt (fetched, never inlined — see server.go newMux).
-  const PALETTE = ["#4b5bd0", "#1a7f37", "#b0851a", "#8a5cd0", "#c04a72", "#2a8fa0", "#6a7a3f", "#4a7ac0"];
+  const PALETTE = ["#7c3aed", "#2f81f7", "#1f9c6b", "#e0662a", "#c05fd6", "#3fb6c4", "#d9a441", "#e05a7d"];
   const COHORTS = PAGE.cohorts.map((c, i) => ({ ...c, color: PALETTE[i % PALETTE.length] }));
 
   // fileBlocks: path → {block, parts}. parts mirrors Go's splitSegmentHunks:
@@ -195,10 +398,8 @@
   function build() {
     document.title = PAGE.title + " — cohort review";
     document.getElementById("pr-title").textContent = PAGE.title;
-    document.getElementById("h-title").textContent = PAGE.title;
-    const walk = document.getElementById("walk");
-    walk.textContent = PAGE.walkthrough;
-    walk.hidden = !PAGE.walkthrough;
+    document.getElementById("walk").textContent = PAGE.walkthrough;
+    document.getElementById("intro").hidden = !PAGE.walkthrough;
     const link = document.getElementById("pr-link");
     link.href = PAGE.url;
     link.hidden = !PAGE.url;
@@ -235,22 +436,26 @@
         const m = p.hunks && fb && fb.parts ? ` (${p.hunks.length}/${fb.parts.length - 1})` : "";
         return esc(p.path) + m;
       };
+      const n = String(ci + 1);
       nav.insertAdjacentHTML("beforeend",
-        `<div class="nav-coh"><div class="nch" onclick="jump('coh-${ci}')">
-          <span class="swatch" style="background:${c.color}"></span>${esc(c.name)}
-          <span class="cnt">${c.files.length}</span></div>
-          <ul class="nav-files">${c.files.map((p, fi) => `<li onclick="jumpFile(${ci}, ${fi})" title="${esc(p.path)}"><span>${label(p)}</span></li>`).join("")}</ul></div>`);
+        `<div class="nav-coh" style="--coh:${c.color}"><div class="nch" id="nch-${ci}" onclick="jump('coh-${ci}')">
+          <div class="nch-top"><span class="nch-n">${n}</span><span class="nch-t">${esc(c.name)}</span></div>
+          <div class="nch-chips"><span class="chip">${c.files.length} files</span>
+            <span class="chip"><span style="color:var(--stat-add)">+${cAdd}</span> <span style="color:var(--stat-del)">−${cDel}</span></span>
+            <span class="dot"></span></div>
+        </div>
+        <ul class="nav-files">${c.files.map((p, fi) => `<li onclick="jumpFile(${ci}, ${fi})" title="${esc(p.path)}"><span>${label(p)}</span></li>`).join("")}</ul></div>`);
 
       // Only the section shell (header, stats, empty wrap) is built here. The
       // diff itself is drawn lazily by renderCohort when the cohort nears the
       // viewport — see the IntersectionObserver below.
       sections.insertAdjacentHTML("beforeend",
-        `<section class="cohort" id="coh-${ci}" data-ci="${ci}">
+        `<section class="cohort" id="coh-${ci}" data-ci="${ci}" style="--coh:${c.color}">
           <div class="coh-head" onclick="this.parentNode.classList.toggle('collapsed')">
-            <span class="swatch" style="background:${c.color}"></span>
+            <span class="coh-n">${n}</span>
             <h2>${esc(c.name)}</h2>
-            <span class="stat"><span style="color:var(--add-ink)">+${cAdd}</span>
-              <span style="color:var(--del-ink)">−${cDel}</span>
+            <span class="coh-stat"><span style="color:var(--stat-add)">+${cAdd}</span>
+              <span style="color:var(--stat-del)">−${cDel}</span>
               <span>${parsed.length} files</span><span class="chev">▾</span></span>
           </div>
           <p class="coh-sum">${esc(c.summary)}</p>
@@ -258,8 +463,12 @@
         </section>`);
     });
 
+    document.getElementById("coh-count").textContent = COHORTS.length;
     document.getElementById("meta").innerHTML =
-      `${COHORTS.length} cohorts · ${nFiles} files · <span style="color:var(--add-ink)">+${tAdd}</span> <span style="color:var(--del-ink)">−${tDel}</span>`;
+      `<span class="repo"><i></i>cohort review</span><span class="sep">·</span>` +
+      `<span>${COHORTS.length} cohorts</span><span class="sep">·</span>` +
+      `<span>${nFiles} files</span><span class="sep">·</span>` +
+      `<span><span style="color:var(--stat-add)">+${tAdd}</span> <span style="color:var(--stat-del)">−${tDel}</span></span>`;
     setFmtButtons();
 
     // Lazy render: drawing a cohort's diff (the diff2html build + highlight.js
@@ -278,6 +487,7 @@
       COHORTS.forEach((_, ci) => renderCohort(ci));
     }
     applyDark();
+    syncActive();
   }
 
   // renderCohort draws one cohort's diff on demand (idempotent). Splitting the
@@ -329,8 +539,14 @@
   function bigFilePlaceholder(host, sub, files) {
     const add = files.reduce((s, f) => s + (f.addedLines || 0), 0);
     const del = files.reduce((s, f) => s + (f.deletedLines || 0), 0);
-    host.innerHTML = `<div class="cr-big"><div class="cr-name">${esc(fileName(files[0]))}</div>
-      <button class="cr-show">show large diff · +${add} −${del}</button></div>`;
+    host.innerHTML = `<div class="cr-big"><div class="cr-name">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="color:var(--muted)"><path d="M4 2h5l3 3v9H4V2Z" stroke="currentColor" stroke-width="1.4"></path><path d="M9 2v3h3" stroke="currentColor" stroke-width="1.4"></path></svg>
+        ${esc(fileName(files[0]))}
+        <span style="margin-left:auto;font-size:12.5px"><span style="color:var(--stat-add)">+${add}</span> <span style="color:var(--stat-del)">−${del}</span></span>
+      </div>
+      <button class="cr-show">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 5.5 8 10.5l5-5" stroke="currentColor" stroke-width="1.6"></path></svg>
+        show large diff</button></div>`;
     host.querySelector(".cr-show").onclick = () => { drawDiff(host, sub); applyDark(); };
   }
 
@@ -342,10 +558,7 @@
     document.getElementById("ll").classList.toggle("on", FMT === "line-by-line");
     document.getElementById("sbs").classList.toggle("on", FMT === "side-by-side");
   }
-  function effectiveDark() {
-    const t = document.documentElement.getAttribute("data-theme");
-    return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
-  }
+  const effectiveDark = () => document.documentElement.getAttribute("data-theme") !== "light";
   function applyDark() {
     const dark = effectiveDark();
     document.querySelectorAll(".d2h-wrapper").forEach(el => el.classList.toggle("d2h-dark-color-scheme", dark));
@@ -369,8 +582,34 @@
     (document.getElementById(`f-${ci}-${fi}`) || sec).scrollIntoView({ behavior: "smooth", block: "start" });
   }
   function toggleTheme() {
-    document.documentElement.setAttribute("data-theme", effectiveDark() ? "light" : "dark");
+    const light = effectiveDark();
+    document.documentElement.setAttribute("data-theme", light ? "light" : "dark");
+    localStorage.setItem("theme", light ? "light" : "dark");
     applyDark();
+  }
+
+  // syncActive highlights the sidebar row for the cohort nearest the top of the
+  // scroller, so the design's selected-row treatment tracks the reading
+  // position instead of being decorative.
+  function syncActive() {
+    const main = document.getElementById("main");
+    let active = 0;
+    COHORTS.forEach((_, ci) => {
+      const el = document.getElementById(`coh-${ci}`);
+      if (el && el.getBoundingClientRect().top - main.getBoundingClientRect().top <= 90) active = ci;
+    });
+    COHORTS.forEach((_, ci) => {
+      const row = document.getElementById(`nch-${ci}`);
+      if (row) row.classList.toggle("on", ci === active);
+    });
+  }
+  {
+    let queued = false;
+    document.getElementById("main").addEventListener("scroll", () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => { queued = false; syncActive(); });
+    }, { passive: true });
   }
 
   // Sidebar resize: drag the right edge; the chosen width persists.
