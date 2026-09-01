@@ -1669,6 +1669,16 @@ The handoff's checklist verbatim. Needs `./.env` creds + logged-in `claude` CLI 
 - [ ] Degradation tests still green (LLM failure → "All changes"); each new behavior has a test
 - [ ] `go vet ./...` and `go test ./...` fully green
 - [ ] Author rating recorded per PR (edit this section): pass at ≥「跟我想的類似」on all three. A miss = tune prompt rules / `minFoldSize`, rerun that golden only — not a redesign.
+
+### M1 acceptance run results (2026-09-01, pre-rating)
+
+Everything automatable ran green; only the author rating is open. Fixtures fetched from `starlinglabs` (9/16/219 files — exact). Blocking bug found and fixed first: claude CLI 2.1.252 changed `-p --output-format json` to an ARRAY envelope; `extractClaudeResult` now unwraps both shapes (`51ef9bb`) — **upstream code-review-agent almost certainly has the same bug**.
+
+- **shopline-16595 — bullseye.** 3 cohorts exactly as expected: script [claim], pipeline [claim] with the `on-fail: ignore` soft-launch surfaced in the claim, deletion cohort with the verbatim three-question claim. 14,877 lines folded (exact golden number), prompt hunks 31KB (vs ~200KB unfolded; the "<30KB" gate reads 31KB by integer division — marginal, treat as met in spirit or tighten later), 0 omitted (vs ~157 unfolded), `folded_lines_pct` 96.6%. Deletion cohort holds 215 members: the other 2 "deleted files" are binary PNGs whose segments have no ---/+++ text headers — `segmentPath` (copied-parity, unchanged since main) has always made such files invisible to index/prompt/page. Pre-existing limitation; fix belongs upstream-convergent, out of M1.
+- **backburner-7 — strong.** nonfix facade cohort detected and typed BOTH runs; worker.rb hunk-split across producer/flush cohorts; reading order 機制→接線→善後 held; `desc_chars: 0` recorded. ERRATUM inherited from the handoff: the expected file's misc line names transformer.go/basic_transformer.go — those are apigw-18 files; backburner has no such refactor. No misc cohort emerged (CHANGELOG anchored everything).
+- **apigw-18 — good with two soft spots.** Hunk-level yaml split across two cohorts worked (order_payment#1 vs #2). But across runs (5 cohorts in the harness run, 3 live — real nondeterminism) the model never emits a [mechanical] NIT cohort and never flags the string→[]byte refactor as [misc] — it absorbs both into claim cohorts with reasonable claims. `misc_lines_pct` is 0 on all runs of all PRs: misc detection has not fired in practice yet. Candidate tuning (post-rating, prompt-only): strengthen the misc rule's "not declared by the description" trigger and/or the mechanical-churn rule.
+- **runs.jsonl**: three full records, schema exact (lines 609/920/15393; anchors incl. `jira_key` PLAT-2328/SL-51617/SL-52648; types histograms; group_secs 18-40s).
+- Still open besides the rating: similar-fold observability run (#1328-shaped PR), optional screenshot refresh.
 - [ ] Wrap up via superpowers:finishing-a-development-branch (merge/PR decision belongs to the author)
 
 ---
