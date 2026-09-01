@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -172,49 +171,92 @@ func churnSeg(p string, churn int) FileSegment {
 }
 
 // TestFoldSimilarShareGuard pins the share guard against real PRs (diffstats
-// fetched 2026-09-01 from starlinglabs). The first seven groups MUST keep
-// folding — they are the mechanical fan-out the heuristic exists for. The last
-// must NOT: its members are dbfle-bson-go#14's entire implementation, so
-// "verify the representative and skim the rest" would be a claim about content
-// nobody checked. Retuning the threshold has to keep every row's verdict.
+// fetched 2026-09-01 from starlinglabs). Each case is a whole PR, because the
+// guard is CUMULATIVE across a PR's groups — testing groups one at a time
+// hides the real ceiling: per group the legitimate maximum is 33.4%, but
+// layout#523's two groups together hide 43.6%, leaving the 50% cap only ~6
+// points of headroom over dbfle-bson-go#14's 58.8% misfire. Retuning must keep
+// every verdict AND every hidden-line count.
 func TestFoldSimilarShareGuard(t *testing.T) {
 	cases := []struct {
-		name     string
-		churns   []int // one churn value per file in the group
-		prChurn  int   // the whole PR's churn, group included
-		wantFold bool
+		name       string
+		groups     [][]int // one churn value per file, per same-shape group
+		prChurn    int     // the whole PR's churn, groups included
+		wantFolds  int     // similar folds that survive the guard
+		wantHidden int     // churn those folds hide, cumulative
 	}{
-		{"obs#1328 shippingfeewhitelist", []int{15, 15, 20, 25, 30, 35, 40, 40, 55}, 3319, true},
-		{"obs#1328 report", []int{11, 20, 30, 35, 45, 50, 68}, 3319, true},
-		{"obs#1328 operationalbill", []int{10, 20, 35, 43, 61}, 3319, true},
-		{"obs#1335 711cb small", []int{14, 20, 30, 40, 50, 55, 60, 70, 71, 85}, 5910, true},
-		{"obs#1335 711cb large", []int{107, 150, 180, 200, 220, 240, 260, 300, 316, 655}, 5910, true},
-		{"layout#523 src", []int{120, 130, 140, 148, 150, 379}, 3941, true},
-		{"layout#523 tests", []int{150, 180, 200, 250, 252, 930}, 3941, true},
-		{"dbfle#14 flebson core", []int{125, 128, 174, 269, 281, 800, 916}, 3022, false},
+		{"obs#1328", [][]int{
+			{15, 15, 20, 25, 30, 35, 40, 40, 55},
+			{11, 20, 30, 35, 45, 50, 68},
+			{10, 20, 35, 43, 61},
+		}, 3319, 3, 519}, // 15.6%
+		{"obs#1335", [][]int{
+			{14, 20, 30, 40, 50, 55, 60, 70, 71, 85},
+			{107, 150, 180, 200, 220, 240, 260, 300, 316, 655},
+		}, 5910, 2, 2383}, // 40.3%
+		{"layout#523", [][]int{
+			{120, 130, 140, 148, 150, 379},
+			{150, 180, 200, 250, 252, 930},
+		}, 3941, 2, 1720}, // 43.6% — the tightest legitimate margin
+		{"dbfle#14 flebson core", [][]int{
+			{125, 128, 174, 269, 281, 800, 916},
+		}, 3022, 0, 0}, // 58.8%: the group is the PR's whole implementation
+		// The cap is inclusive: exactly half folds, one line more does not.
+		{"exactly half", [][]int{{10, 10, 10, 10, 10}}, 80, 1, 40},
+		{"just over half", [][]int{{10, 10, 10, 10, 10}}, 79, 0, 0},
 	}
 	for _, c := range cases {
 		var segs []FileSegment
 		sum := 0
-		for i, churn := range c.churns {
-			segs = append(segs, churnSeg(fmt.Sprintf("pkg/f%d.go", i), churn))
-			sum += churn
+		for gi, group := range c.groups {
+			for i, churn := range group {
+				// One directory per group: same dir would merge same-magnitude
+				// groups into one, which is not the shape being modeled.
+				segs = append(segs, churnSeg(fmt.Sprintf("g%d/f%d.go", gi, i), churn))
+				sum += churn
+			}
 		}
-		// One file outside the group carries the rest of the PR's churn, so the
-		// guard sees the real denominator.
+		// One file outside every group carries the rest of the PR's churn, so
+		// the guard sees the real denominator.
 		if rest := c.prChurn - sum; rest > 0 {
 			segs = append(segs, churnSeg("other/rest.txt", rest))
 		}
-		folded := false
+		folds, hidden := 0, 0
 		for _, f := range foldSegments(segs) {
 			if f.Kind == "similar" {
-				folded = true
+				folds++
+				hidden += f.Lines
 			}
 		}
-		if folded != c.wantFold {
-			t.Errorf("%s: hides %d of %d lines — folded=%v, want %v",
-				c.name, sum-slices.Max(c.churns), c.prChurn, folded, c.wantFold)
+		if folds != c.wantFolds || hidden != c.wantHidden {
+			t.Errorf("%s: %d folds hiding %d of %d lines, want %d folds hiding %d",
+				c.name, folds, hidden, c.prChurn, c.wantFolds, c.wantHidden)
 		}
+	}
+}
+
+// TestFoldSimilarSurvivorBackstop pins the delete-heavy case where the whole-PR
+// cap is provably unreachable: members are a subset of what deletion folding
+// left, so once deletions hide half the diff no similar fold can exceed half of
+// it. Without the survivor bound this group hides 91% of everything still
+// readable and the whole-PR cap stays silent.
+func TestFoldSimilarSurvivorBackstop(t *testing.T) {
+	var segs []FileSegment
+	for i := 0; i < 5; i++ { // 5 deleted files, 200 churn each → 1000 hidden
+		p := fmt.Sprintf("old/d%d.go", i)
+		segs = append(segs, seg(p, "diff --git a/"+p+" b/"+p+"\ndeleted file mode 100644\n--- a/"+p+
+			"\n+++ /dev/null\n@@ -1 +1 @@\n"+strings.Repeat("-x\n", 200)))
+	}
+	for i := 0; i < 11; i++ { // 11 survivors, 10 churn each → a group hiding 100 of 110
+		segs = append(segs, churnSeg(fmt.Sprintf("live/f%d.go", i), 10))
+	}
+	var kinds []string
+	for _, f := range foldSegments(segs) {
+		kinds = append(kinds, f.Kind)
+	}
+	// The deletion fold must still happen; the similar one must not.
+	if len(kinds) != 1 || kinds[0] != "deletion" {
+		t.Errorf("survivor backstop not enforced: folds = %v", kinds)
 	}
 }
 

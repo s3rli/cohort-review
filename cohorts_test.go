@@ -646,6 +646,10 @@ func TestFoldedPromptSimilarKeepsRepHunks(t *testing.T) {
 	segs := []FileSegment{
 		mechSeg("cfg/a.yaml", 1), mechSeg("cfg/b.yaml", 1), mechSeg("cfg/c.yaml", 1),
 		mechSeg("cfg/d.yaml", 1), mechSeg("cfg/e.yaml", 4),
+		// Padding keeps this fixture off the share guard's exact-50% boundary —
+		// that boundary is pinned deliberately in TestFoldSimilarShareGuard, and
+		// this test is about prompt shape, not the guard.
+		mechSeg("other/pad.go", 10),
 	}
 	in := buildPromptInput(segs, foldSegments(segs), defaultBudget)
 	if !strings.Contains(in.Hunks, "### hunk cfg/e.yaml#1") {

@@ -48,6 +48,6 @@ Cohorts carry a type: **claim** (answer the one-question claim), **mechanical** 
 - A mixed-concern file can be split across cohorts by hunk — the sidebar shows a `(k/M)` hunk count and the full diff still renders exactly once.
 - Diffs over the budget still group **all** files — overflow files' hunks are trimmed to their leading hunks (or omitted entirely) in the model input; the rendered page always shows the full diff.
 - Server binds 127.0.0.1 only.
-- Repeated churn is folded out of the model input — piles of deleted files, and ≥5 same-directory/same-extension/same-size files reduced to one representative — so the model sees a summary line instead of their hunks. The rendered page always shows the full diff.
+- Repeated churn is folded out of the model input — piles of deleted files, and ≥5 same-directory/same-extension/same-size files reduced to one representative — so the model sees a summary line instead of their hunks. Same-shape folding backs off when a group would hide more than half the PR: at that point the group is the change itself, not repetition around it. The rendered page always shows the full diff.
 - Small pieces are copied from the internal `code-review-agent` repo (marked with provenance headers) pending same-source convergence.
 - `make golden` replays the three stored golden PRs for human comparison (see `testdata/golden/`).

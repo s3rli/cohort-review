@@ -21,13 +21,25 @@ const minFoldSize = 5
 // model just as badly as one at 98%).
 // A fold compresses a repetitive tail; when a group is most of the PR it IS
 // the PR, and "verify the representative, skim the rest" becomes a claim about
-// content nobody checked. Calibrated against real PRs (see
-// TestFoldSimilarShareGuard): genuine mechanical fan-out hides 3–33% of churn,
-// while dbfle-bson-go#14 — where the group was the whole implementation —
-// hides 59%. Deletion folds are deliberately exempt: their claim is honest
-// about unread code, and a delete-only PR is legitimately ~all deletion
-// (api.shoplineapp.com#16595 folds 96.6%).
+// content nobody checked. Calibrated per PR against real ones (see
+// TestFoldSimilarShareGuard): genuine mechanical fan-out hides 15.6%, 40.3%
+// and 43.6% of churn across all its groups, while dbfle-bson-go#14 — where the
+// group was the whole implementation — hides 58.8%. The real headroom is
+// therefore 6 points, not 17. Deletion folds are deliberately exempt: their
+// claim is honest about unread code, and a delete-only PR is legitimately ~all
+// deletion (api.shoplineapp.com#16595 folds 96.6%).
 const maxSimilarSharePct = 50
+
+// maxSurvivorSharePct backstops the cap above on delete-heavy PRs, where it is
+// provably unreachable: a similar fold's members are a subset of what deletion
+// folding left behind, so once deletions hide half the diff no similar fold can
+// exceed half of it, and the cap goes silent while a group hides ~everything
+// still readable. This bounds hiding against what the model can actually READ.
+// Deliberately loose: no PR in hand exercises it, and it is non-binding on every
+// calibrated case (nothing deleted there, so the two bases are equal). Tighten
+// only with evidence — splitting runs.jsonl's folded_lines_pct into deletion
+// and similar shares would supply it.
+const maxSurvivorSharePct = 90
 
 // A Fold is one planned summary line: files whose hunks the model won't see.
 type Fold struct {
@@ -74,6 +86,8 @@ func foldSegments(segs []FileSegment) []Fold {
 		seen[s.Path]++
 		st, a, d := segmentStat(s)
 		stats[s.Path] = stat{st, a, d}
+		// Counts every segment, duplicate paths included, so the share guard
+		// and runs.jsonl's folded_lines_pct measure against the same base.
 		totalChurn += a + d
 	}
 	foldable := func(p string) bool { return p != "" && seen[p] == 1 }
@@ -92,6 +106,7 @@ func foldSegments(segs []FileSegment) []Fold {
 		delGroups[d] = append(delGroups[d], s.Path)
 	}
 	var folds []Fold
+	deletionLines := 0
 	for _, d := range delOrder {
 		members := delGroups[d]
 		if len(members) < minFoldSize {
@@ -101,6 +116,7 @@ func foldSegments(segs []FileSegment) []Fold {
 		for _, p := range members {
 			f.Lines += stats[p].added + stats[p].deleted
 		}
+		deletionLines += f.Lines
 		folds = append(folds, f)
 	}
 
@@ -154,10 +170,13 @@ func foldSegments(segs []FileSegment) []Fold {
 			// the model at a representative with no hunks.
 			continue
 		}
-		if (similarLines+f.Lines)*100 > totalChurn*maxSimilarSharePct {
-			// This group is the body of the PR, not a tail: fold nothing and let
-			// the model read every file. Groups are visited in first-appearance
-			// order, so which one wins the budget is deterministic.
+		hidden := similarLines + f.Lines
+		if hidden*100 > totalChurn*maxSimilarSharePct ||
+			hidden*100 > (totalChurn-deletionLines)*maxSurvivorSharePct {
+			// This group is the body of the PR (or of what survives deletion
+			// folding), not a tail: fold nothing and let the model read every
+			// file. Greedy first-fit in first-appearance order — a group that
+			// doesn't fit is skipped and later, smaller groups may still fold.
 			continue
 		}
 		similarLines += f.Lines
