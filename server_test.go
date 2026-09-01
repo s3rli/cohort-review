@@ -18,7 +18,7 @@ import (
 func testGrouping() Grouping {
 	return Grouping{
 		Walkthrough: "Does things.",
-		Cohorts:     []Cohort{{Name: "Core", Summary: "the core", Files: []FileRef{{Path: "a.go"}}}},
+		Cohorts:     []Cohort{{Name: "Core", Summary: "the core", Claim: "does it work?", Type: "claim", Files: []FileRef{{Path: "a.go"}}}},
 	}
 }
 
@@ -164,7 +164,14 @@ func TestLoadFetchFailureKeepsState(t *testing.T) {
 }
 
 func TestRenderPageDataRoundTrips(t *testing.T) {
-	g := testGrouping()
+	g := Grouping{
+		Walkthrough: "Does things.",
+		Cohorts: []Cohort{
+			{Name: "Core", Summary: "the core", Claim: "does it work?", Type: "claim", Files: []FileRef{{Path: "a.go"}}},
+			{Name: "Dels", Summary: "old suite", Claim: "is the removal complete?", Type: "deletion",
+				Files: []FileRef{{Path: "old/x.go"}, {Path: "old/y.go"}}},
+		},
+	}
 	page, err := renderPage(PullRequest{Title: "T", WebURL: "u"}, g, "side-by-side")
 	if err != nil {
 		t.Fatal(err)
@@ -177,8 +184,14 @@ func TestRenderPageDataRoundTrips(t *testing.T) {
 	if err := json.Unmarshal(m[1], &got); err != nil {
 		t.Fatalf("PAGE is not valid JSON: %v", err)
 	}
-	if got.Title != "T" || got.Format != "side-by-side" || len(got.Cohorts) != 1 || got.Cohorts[0].Files[0].Path != "a.go" {
+	if got.Title != "T" || got.Format != "side-by-side" || len(got.Cohorts) != 2 || got.Cohorts[0].Files[0].Path != "a.go" {
 		t.Errorf("round-trip mismatch: %+v", got)
+	}
+	if got.Cohorts[0].Claim != "does it work?" || got.Cohorts[0].Type != "claim" {
+		t.Errorf("claim/type lost: %+v", got.Cohorts[0])
+	}
+	if got.Cohorts[1].Type != "deletion" {
+		t.Errorf("type lost: %+v", got.Cohorts[1])
 	}
 }
 

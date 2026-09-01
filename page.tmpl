@@ -85,6 +85,14 @@
   .coh-head .chev { color: var(--muted); font-size: 12px; transition: transform .15s; }
   .cohort.collapsed .chev { transform: rotate(-90deg); }
   .coh-sum { font-size: 13.5px; color: var(--ink-2); margin: 0 0 12px 21px; line-height: 1.5; }
+  .coh-claim { font-size: 13px; color: var(--ink-2); margin: -6px 0 12px 21px; line-height: 1.5; }
+  .coh-claim b { color: var(--accent); font-weight: 650; }
+  .kpill { font-family: var(--mono); font-size: 10px; font-weight: 600; border-radius: 20px;
+    padding: 2px 8px; letter-spacing: .04em; flex: none; }
+  .kpill.mechanical, .kpill.deletion { background: var(--sidebar); color: var(--ink-2); border: 1px solid var(--border); }
+  .kpill.nonfix { background: var(--accent-soft); color: var(--accent); }
+  .kpill.misc { background: var(--accent-soft); color: var(--del-ink); border: 1px solid var(--del-ink); }
+  .cohort.misc .coh-head h2 { color: var(--del-ink); }
   .cohort.collapsed .coh-body { display: none; }
   .d2h-wrap { margin-bottom: 8px; }
   /* The hljs themes paint a block background on every highlighted element,
@@ -192,6 +200,17 @@
   let io = null;              // IntersectionObserver driving lazy cohort render
   const cohortState = [];     // per-cohort: { sub, parsed, present, rendered }
 
+  // Type badges; "claim" is the default and untyped fallback buckets get no
+  // badge either. Types come from the server-side enum (validType), so they
+  // are safe as class names.
+  const TYPES = { mechanical: "mechanical", deletion: "deletion", nonfix: "nonfix", misc: "undeclared ⚠" };
+  const TYPE_HELP = {
+    mechanical: "Same-shape churn folded together — verify the representative, skim the rest",
+    deletion: "Deleted files — is the removal complete, who inherits the coverage, what is the transition risk?",
+    nonfix: "Pins current behavior instead of changing it — review the decision not to fix",
+    misc: "Not declared by the PR description — ask the author",
+  };
+
   function build() {
     document.title = PAGE.title + " — cohort review";
     document.getElementById("pr-title").textContent = PAGE.title;
@@ -244,16 +263,22 @@
       // Only the section shell (header, stats, empty wrap) is built here. The
       // diff itself is drawn lazily by renderCohort when the cohort nears the
       // viewport — see the IntersectionObserver below.
+      const ctype = Object.hasOwn(TYPES, c.type) ? c.type : "";
+      // Handoff W2.3: mechanical and deletion cohorts start collapsed —
+      // verifying the claim rarely needs the full diff open.
+      const startCollapsed = c.type === "mechanical" || c.type === "deletion";
       sections.insertAdjacentHTML("beforeend",
-        `<section class="cohort" id="coh-${ci}" data-ci="${ci}">
-          <div class="coh-head" onclick="this.parentNode.classList.toggle('collapsed')">
+        `<section class="cohort${ctype ? " " + ctype : ""}${startCollapsed ? " collapsed" : ""}" id="coh-${ci}" data-ci="${ci}">
+          <div class="coh-head" onclick="toggleCohort(this.parentNode)">
             <span class="swatch" style="background:${c.color}"></span>
             <h2>${esc(c.name)}</h2>
+            ${ctype ? `<span class="kpill ${ctype}" title="${TYPE_HELP[ctype]}">${TYPES[ctype]}</span>` : ""}
             <span class="stat"><span style="color:var(--add-ink)">+${cAdd}</span>
               <span style="color:var(--del-ink)">−${cDel}</span>
               <span>${parsed.length} files</span><span class="chev">▾</span></span>
           </div>
-          <p class="coh-sum">${esc(c.summary)}</p>
+          <p class="coh-sum">${esc(c.summary || "")}</p>
+          ${c.claim ? `<p class="coh-claim"><b>claim</b> ${esc(c.claim)}</p>` : ""}
           <div class="coh-body"><div class="d2h-wrap" id="wrap-${ci}"><div class="coh-pending">rendering…</div></div></div>
         </section>`);
     });
@@ -280,6 +305,13 @@
     applyDark();
   }
 
+  // toggleCohort: expanding must also draw — a collapsed cohort is skipped by
+  // renderCohort, so the header is a render trigger, not just a class toggle.
+  function toggleCohort(sec) {
+    sec.classList.toggle("collapsed");
+    if (!sec.classList.contains("collapsed")) renderCohort(+sec.dataset.ci);
+  }
+
   // renderCohort draws one cohort's diff on demand (idempotent). Splitting the
   // draw out of build() is what makes lazy rendering possible. Each file gets
   // its own host div: large files are spotted from the parse BEFORE diff2html
@@ -288,6 +320,9 @@
   function renderCohort(ci) {
     const st = cohortState[ci];
     if (!st || st.rendered) return;
+    // Collapsed cohorts stay undrawn (rendered stays false) — the expensive
+    // diff2html + highlight pass runs on first expand, not into a hidden box.
+    if (document.getElementById(`coh-${ci}`).classList.contains("collapsed")) return;
     st.rendered = true;
     const wrap = document.getElementById(`wrap-${ci}`);
     wrap.innerHTML = "";
@@ -355,8 +390,8 @@
   function jump(id) {
     const el = document.getElementById(id);
     if (!el) return;
-    if (el.dataset.ci !== undefined) renderCohort(+el.dataset.ci);
     el.classList.remove("collapsed");
+    if (el.dataset.ci !== undefined) renderCohort(+el.dataset.ci);
     el.scrollIntoView({ behavior: "smooth", block: "start" });
   }
   // Jump to one file's diff card; falls back to the cohort header when the
@@ -364,8 +399,8 @@
   function jumpFile(ci, fi) {
     const sec = document.getElementById(`coh-${ci}`);
     if (!sec) return;
-    renderCohort(ci);
     sec.classList.remove("collapsed");
+    renderCohort(ci);
     (document.getElementById(`f-${ci}-${fi}`) || sec).scrollIntoView({ behavior: "smooth", block: "start" });
   }
   function toggleTheme() {
