@@ -6,10 +6,11 @@
 // A run can append more than one line: each credential-pair attempt is its own
 // line, and a render failure after a successful grouping appends both a full
 // record and an error line. Full records always carry "cohorts"/"anchor";
-// attempt-failure lines carry only ts/pr/error — filter on those before
-// averaging misc_lines_pct, or the phantom zeros deflate the gauge:
+// attempt-failure lines carry only ts/pr/error plus always-present zero pct
+// fields — those zeros are the phantoms to filter out before averaging
+// misc_lines_pct, or they deflate the gauge:
 //
-//	jq -s '[.[]|select(has("cohorts"))]|map(.misc_lines_pct)|add/length' runs.jsonl
+//	jq -s '[.[]|select(has("cohorts") and (has("error")|not))]|map(.misc_lines_pct)|add/length' runs.jsonl
 package main
 
 import (

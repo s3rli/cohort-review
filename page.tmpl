@@ -158,7 +158,7 @@
 <script>const PAGE = {{.Page}};</script>
 <script>
   // Glue adapted from the prototype artifact; data comes from PAGE and the
-  // diff from /diff.txt (fetched, never inlined — see server.go newMux).
+  // diff from /diff.txt (fetched, never inlined — see server.go mux).
   const PALETTE = ["#4b5bd0", "#1a7f37", "#b0851a", "#8a5cd0", "#c04a72", "#2a8fa0", "#6a7a3f", "#4a7ac0"];
   const COHORTS = PAGE.cohorts.map((c, i) => ({ ...c, color: PALETTE[i % PALETTE.length] }));
 
