@@ -47,7 +47,7 @@
     --chg-add:var(--add-bg-2); --chg-del:var(--del-bg-2); --chg-ink:var(--chip-ink);
 
     --link:#b892ff; --link-h:#d3bcff;
-    --hatch:repeating-linear-gradient(45deg,rgba(255,255,255,.028) 0 1px,transparent 1px 7px);
+    --hatch:repeating-linear-gradient(45deg,rgba(255,255,255,.09) 0 1px,transparent 1px 7px);
 
     --sans:'IBM Plex Sans',system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
     --mono:'IBM Plex Mono',ui-monospace,"SF Mono","SFMono-Regular",Menlo,Consolas,monospace;
@@ -76,7 +76,7 @@
     --chg-add:var(--add-bg-2); --chg-del:var(--del-bg-2); --chg-ink:var(--chip-ink);
 
     --link:#6d28d9; --link-h:#5b21b6;
-    --hatch:repeating-linear-gradient(45deg,rgba(0,0,0,.04) 0 1px,transparent 1px 7px);
+    --hatch:repeating-linear-gradient(45deg,rgba(0,0,0,.10) 0 1px,transparent 1px 7px);
   }
 
   /* diff2html is re-skinned through its own custom properties rather than by
@@ -213,18 +213,17 @@
   .seg button:hover { background: var(--panel-2); color: var(--ink); }
   .seg button.on { background: var(--accent); color: var(--accent-ink); }
 
-  .cohort { padding: 0 30px; margin-bottom: 34px; scroll-margin-top: 16px; }
-  .coh-head { display: flex; align-items: center; gap: 11px; cursor: pointer; }
-  .coh-n { flex: none; font-family: var(--mono); font-size: 13px; color: var(--coh); }
-  .coh-head h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.015em;
+  /* One cohort per page, so its header is the page heading — the design's
+     25px h1 + blurb slot, which previously had nothing to hold. */
+  .cohort { padding: 0 30px 44px; }
+  .coh-head { display: flex; align-items: center; gap: 11px; }
+  .coh-n { width: 12px; flex: none; font-family: var(--mono); font-size: 13px; color: var(--coh); }
+  .coh-head h2 { margin: 0; font-size: 25px; font-weight: 600; letter-spacing: -.015em;
     color: var(--ink-hi); }
   .coh-stat { margin-left: auto; display: flex; align-items: center; gap: 10px;
     font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
-  .coh-stat .chev { color: var(--muted-2); font-size: 11px; transition: transform .15s; }
-  .cohort.collapsed .chev { transform: rotate(-90deg); }
-  .coh-sum { margin: 9px 0 16px; padding-left: 23px; font-size: 14.5px; line-height: 1.55;
+  .coh-sum { margin: 10px 0 20px; padding-left: 23px; font-size: 14.5px; line-height: 1.55;
     color: var(--ink-3); max-width: 78ch; text-wrap: pretty; }
-  .cohort.collapsed .coh-body { display: none; }
   .coh-pending { color: var(--muted); font-family: var(--mono); font-size: 12px; padding: 16px 4px; }
 
   /* Structural diff2html overrides — the parts its custom properties don't
@@ -344,6 +343,7 @@
       <p class="walk" id="walk"></p>
     </div>
     <div class="toolbar">
+      <span class="seg"><button id="m-paged" onclick="go(ACTIVE, 'paged')">paged</button><button id="m-all" onclick="go(ACTIVE, 'all')">all cohorts</button></span>
       <span class="seg"><button id="ll" onclick="setFmt('line-by-line')">line-by-line</button><button id="sbs" onclick="setFmt('side-by-side')">side-by-side</button></span>
     </div>
     <div id="sections"><div class="loading">loading diff…</div></div>
@@ -395,6 +395,16 @@
   let io = null;              // IntersectionObserver driving lazy cohort render
   const cohortState = [];     // per-cohort: { sub, parsed, present, rendered }
 
+  // Two ways to read the same cohorts, both linkable as #<mode>/<n>:
+  //   paged — one cohort on screen, chosen from the sidebar (the default)
+  //   all   — every cohort in one scroll, which is what keeps ctrl-F over the
+  //           whole PR possible
+  // Both modes share one set of section elements and one cohortState, so a
+  // cohort drawn in either mode stays drawn, and its Viewed checkboxes (DOM
+  // state inside the diff) survive switching cohort or mode.
+  let MODE = "paged";
+  let ACTIVE = 0;
+
   function build() {
     document.title = PAGE.title + " — cohort review";
     document.getElementById("pr-title").textContent = PAGE.title;
@@ -438,7 +448,7 @@
       };
       const n = String(ci + 1);
       nav.insertAdjacentHTML("beforeend",
-        `<div class="nav-coh" style="--coh:${c.color}"><div class="nch" id="nch-${ci}" onclick="jump('coh-${ci}')">
+        `<div class="nav-coh" style="--coh:${c.color}"><div class="nch" id="nch-${ci}" onclick="go(${ci})">
           <div class="nch-top"><span class="nch-n">${n}</span><span class="nch-t">${esc(c.name)}</span></div>
           <div class="nch-chips"><span class="chip">${c.files.length} files</span>
             <span class="chip"><span style="color:var(--stat-add)">+${cAdd}</span> <span style="color:var(--stat-del)">−${cDel}</span></span>
@@ -446,20 +456,20 @@
         </div>
         <ul class="nav-files">${c.files.map((p, fi) => `<li onclick="jumpFile(${ci}, ${fi})" title="${esc(p.path)}"><span>${label(p)}</span></li>`).join("")}</ul></div>`);
 
-      // Only the section shell (header, stats, empty wrap) is built here. The
-      // diff itself is drawn lazily by renderCohort when the cohort nears the
-      // viewport — see the IntersectionObserver below.
+      // Only the section shell (header, stats, empty wrap) is built here; the
+      // diff is drawn by renderCohort, on selection in paged mode and on
+      // approach in all mode. Hidden until applyMode decides.
       sections.insertAdjacentHTML("beforeend",
-        `<section class="cohort" id="coh-${ci}" data-ci="${ci}" style="--coh:${c.color}">
-          <div class="coh-head" onclick="this.parentNode.classList.toggle('collapsed')">
+        `<section class="cohort" id="coh-${ci}" data-ci="${ci}" style="--coh:${c.color}" hidden>
+          <div class="coh-head">
             <span class="coh-n">${n}</span>
             <h2>${esc(c.name)}</h2>
             <span class="coh-stat"><span style="color:var(--stat-add)">+${cAdd}</span>
               <span style="color:var(--stat-del)">−${cDel}</span>
-              <span>${parsed.length} files</span><span class="chev">▾</span></span>
+              <span>${parsed.length} files</span></span>
           </div>
           <p class="coh-sum">${esc(c.summary)}</p>
-          <div class="coh-body"><div class="d2h-wrap" id="wrap-${ci}"><div class="coh-pending">rendering…</div></div></div>
+          <div class="d2h-wrap" id="wrap-${ci}"><div class="coh-pending">rendering…</div></div>
         </section>`);
     });
 
@@ -470,24 +480,9 @@
       `<span>${nFiles} files</span><span class="sep">·</span>` +
       `<span><span style="color:var(--stat-add)">+${tAdd}</span> <span style="color:var(--stat-del)">−${tDel}</span></span>`;
     setFmtButtons();
-
-    // Lazy render: drawing a cohort's diff (the diff2html build + highlight.js
-    // pass) is the expensive part, so defer it until the cohort nears the
-    // viewport. On a large PR only the visible cohorts ever get drawn, which is
-    // what stops the page from janking. jump()/jumpFile() force a render before
-    // scrolling to an off-screen target.
-    if ("IntersectionObserver" in window) {
-      io = new IntersectionObserver(entries => {
-        for (const e of entries) {
-          if (e.isIntersecting) { renderCohort(+e.target.dataset.ci); io.unobserve(e.target); }
-        }
-      }, { rootMargin: "800px 0px" });
-      document.querySelectorAll(".cohort").forEach(el => io.observe(el));
-    } else {
-      COHORTS.forEach((_, ci) => renderCohort(ci));
-    }
     applyDark();
-    syncActive();
+    const t = parseHash();
+    go(t.ci, t.mode, false);
   }
 
   // renderCohort draws one cohort's diff on demand (idempotent). Splitting the
@@ -512,9 +507,8 @@
     });
     applyDark();
     // A drawn cohort changes every later section's offset, so the scroll spy's
-    // last answer is stale — build() in particular runs it while every cohort
-    // is still an empty placeholder.
-    syncActive();
+    // last answer is stale. Only all mode has a spy to correct.
+    if (MODE === "all") syncActive();
   }
 
   // Diff2HtmlUI (rather than Diff2Html.html) so draw() runs the bundled
@@ -554,13 +548,24 @@
     host.querySelector(".cr-show").onclick = () => { drawDiff(host, sub); applyDark(); };
   }
 
+  // Layout is the only thing that changes, and the parsed subs don't depend on
+  // it — so throw away just the drawn HTML, and only for cohorts that have any.
+  // Unvisited cohorts stay undrawn.
   function setFmt(f) {
     FMT = f;
-    build();
+    setFmtButtons();
+    cohortState.forEach((st, ci) => {
+      if (!st.rendered) return;
+      st.rendered = false;
+      document.getElementById(`wrap-${ci}`).innerHTML = "";
+    });
+    applyMode();
   }
   function setFmtButtons() {
     document.getElementById("ll").classList.toggle("on", FMT === "line-by-line");
     document.getElementById("sbs").classList.toggle("on", FMT === "side-by-side");
+    document.getElementById("m-paged").classList.toggle("on", MODE === "paged");
+    document.getElementById("m-all").classList.toggle("on", MODE === "all");
   }
   const effectiveDark = () => document.documentElement.getAttribute("data-theme") !== "light";
   function applyDark() {
@@ -569,21 +574,101 @@
     document.getElementById("hl-light").disabled = dark;
     document.getElementById("hl-dark").disabled = !dark;
   }
-  function jump(id) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (el.dataset.ci !== undefined) renderCohort(+el.dataset.ci);
-    el.classList.remove("collapsed");
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  // applyMode shows the right sections and arms the machinery that mode needs.
+  // Deferred drawing and the scroll spy only earn their keep in all mode, where
+  // every cohort is on the page at once; paged mode draws the one cohort it
+  // shows and takes its highlight from the selection.
+  function applyMode() {
+    const all = MODE === "all";
+    COHORTS.forEach((_, i) => { document.getElementById(`coh-${i}`).hidden = !all && i !== ACTIVE; });
+    if (io) { io.disconnect(); io = null; }
+    if (!all) {
+      renderCohort(ACTIVE);
+    } else if ("IntersectionObserver" in window) {
+      io = new IntersectionObserver(entries => {
+        for (const e of entries) {
+          if (e.isIntersecting) { renderCohort(+e.target.dataset.ci); io.unobserve(e.target); }
+        }
+      }, { rootMargin: "800px 0px" });
+      document.querySelectorAll(".cohort").forEach(el => io.observe(el));
+    } else {
+      COHORTS.forEach((_, ci) => renderCohort(ci));
+    }
+    setFmtButtons();
+    syncActive();
   }
+
+  // Landing on a cohort in all mode is a moving target. File cards use
+  // content-visibility, so a card above the target reports its estimated height
+  // until it actually paints, then swaps in the real one and pushes the target
+  // down — a plain scrollIntoView lands thousands of pixels short. Nudge until
+  // the target stops moving, and get out of the way the moment the user scrolls.
+  let settleToken = 0;
+  function scrollToCohort(ci) {
+    const main = document.getElementById("main");
+    const el = document.getElementById(`coh-${ci}`);
+    el.scrollIntoView({ block: "start" });
+    const mine = ++settleToken;
+    // Spaced over ~1s rather than per-frame: each correction reveals more
+    // content-visibility cards above, and they need a beat to lay out before
+    // the next measurement means anything. A tall viewport resolves far more
+    // per step than a frame budget could absorb.
+    let tries = 25;
+    const step = () => {
+      if (mine !== settleToken || tries-- <= 0) return;
+      const top = el.getBoundingClientRect().top - main.getBoundingClientRect().top;
+      if (Math.abs(top) < 2) return;
+      main.scrollTop += top;
+      setTimeout(step, 40);
+    };
+    setTimeout(step, 0);
+  }
+  ["wheel", "touchstart", "keydown"].forEach(t =>
+    addEventListener(t, () => settleToken++, { passive: true }));
+
+  // go is the single entry point for navigation: it moves, then records where
+  // it moved to. Scrolling in all mode does NOT push history — only explicit
+  // navigation does, so back/forward stay meaningful.
+  function go(ci, mode = MODE, push = true) {
+    if (!COHORTS[ci]) ci = 0;
+    const jumped = mode !== MODE;
+    MODE = mode;
+    ACTIVE = ci;
+    localStorage.setItem("viewMode", MODE);
+    applyMode();
+    if (MODE === "all") {
+      // Every cohort ABOVE the target has to be drawn before we scroll. Drawing
+      // one afterwards (which the observer will) grows the page above the
+      // target and shoves it back off-screen — deep-linking to #all/4 landed
+      // nowhere near cohort 4 without this.
+      for (let i = 0; i <= ci; i++) renderCohort(i);
+      scrollToCohort(ci);
+    } else {
+      document.getElementById("main").scrollTop = 0;
+    }
+    const h = `#${MODE}/${ci + 1}`;
+    if (push && location.hash !== h) location.hash = h;
+  }
+
+  // Hash wins on load; otherwise the last mode used, like the theme.
+  function parseHash() {
+    const m = /^#(paged|all)\/(\d+)$/.exec(location.hash);
+    if (m) return { mode: m[1], ci: Math.min(Math.max(+m[2] - 1, 0), COHORTS.length - 1) };
+    return { mode: localStorage.getItem("viewMode") === "all" ? "all" : "paged", ci: 0 };
+  }
+  addEventListener("hashchange", () => {
+    const t = parseHash();
+    // go() sets the hash itself; re-entering for a move already made would
+    // undo the scroll jumpFile just did.
+    if (t.mode !== MODE || t.ci !== ACTIVE) go(t.ci, t.mode, false);
+  });
+
   // Jump to one file's diff card; falls back to the cohort header when the
   // file has no rendered block (e.g. its hunks were absent from the diff).
   function jumpFile(ci, fi) {
-    const sec = document.getElementById(`coh-${ci}`);
-    if (!sec) return;
-    renderCohort(ci);
-    sec.classList.remove("collapsed");
-    (document.getElementById(`f-${ci}-${fi}`) || sec).scrollIntoView({ behavior: "smooth", block: "start" });
+    go(ci);
+    const el = document.getElementById(`f-${ci}-${fi}`) || document.getElementById(`coh-${ci}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   }
   function toggleTheme() {
     const light = effectiveDark();
@@ -592,25 +677,27 @@
     applyDark();
   }
 
-  // syncActive highlights the sidebar row for the cohort nearest the top of the
-  // scroller, so the design's selected-row treatment tracks the reading
-  // position instead of being decorative.
+  // syncActive keeps the sidebar highlight honest. In all mode that means the
+  // cohort nearest the top of the scroller; in paged mode the selection already
+  // is the answer.
   function syncActive() {
-    const main = document.getElementById("main");
-    let active = 0;
-    COHORTS.forEach((_, ci) => {
-      const el = document.getElementById(`coh-${ci}`);
-      if (el && el.getBoundingClientRect().top - main.getBoundingClientRect().top <= 90) active = ci;
-    });
+    if (MODE === "all") {
+      const main = document.getElementById("main");
+      const mt = main.getBoundingClientRect().top;
+      COHORTS.forEach((_, ci) => {
+        const el = document.getElementById(`coh-${ci}`);
+        if (el && el.getBoundingClientRect().top - mt <= 90) ACTIVE = ci;
+      });
+    }
     COHORTS.forEach((_, ci) => {
       const row = document.getElementById(`nch-${ci}`);
-      if (row) row.classList.toggle("on", ci === active);
+      if (row) row.classList.toggle("on", ci === ACTIVE);
     });
   }
   {
     let queued = false;
     document.getElementById("main").addEventListener("scroll", () => {
-      if (queued) return;
+      if (MODE !== "all" || queued) return;
       queued = true;
       requestAnimationFrame(() => { queued = false; syncActive(); });
     }, { passive: true });
