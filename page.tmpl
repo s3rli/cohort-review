@@ -511,6 +511,10 @@
       else drawDiff(host, st.subs[fi]);
     });
     applyDark();
+    // A drawn cohort changes every later section's offset, so the scroll spy's
+    // last answer is stale — build() in particular runs it while every cohort
+    // is still an empty placeholder.
+    syncActive();
   }
 
   // Diff2HtmlUI (rather than Diff2Html.html) so draw() runs the bundled
