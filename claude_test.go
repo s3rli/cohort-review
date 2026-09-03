@@ -36,4 +36,17 @@ func TestExtractClaudeResult(t *testing.T) {
 	if got := extractClaudeResult([]byte(`{"other": 1}`)); got != `{"other": 1}` {
 		t.Errorf("no result field: got %q", got)
 	}
+	// Stream-event array: the answer is in the trailing "result" event, and
+	// earlier events carry no usable text.
+	events := `[{"type":"system","subtype":"init","tools":[]},` +
+		`{"type":"assistant","message":{}},` +
+		`{"type":"result","subtype":"success","result":"hello","is_error":false}]`
+	if got := extractClaudeResult([]byte(events)); got != "hello" {
+		t.Errorf("stream array: got %q", got)
+	}
+	// An array with no result event is not an envelope — return it raw.
+	noResult := `[{"type":"system"},{"type":"assistant"}]`
+	if got := extractClaudeResult([]byte(noResult)); got != noResult {
+		t.Errorf("array without result: got %q", got)
+	}
 }
