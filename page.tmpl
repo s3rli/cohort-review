@@ -200,6 +200,7 @@
     border-radius: 6px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     direction: rtl; text-align: left; }
   .nav-files li:hover { background: var(--panel-2); color: var(--ink); }
+  .nav-files li.on { background: var(--panel-3); color: var(--ink-hi); }
   .nav-files li span { direction: ltr; unicode-bidi: bidi-override; }
 
   main { flex: 1; min-width: 0; overflow-y: auto; background: var(--canvas); }
@@ -208,6 +209,30 @@
   .walk { margin: 0; font-size: 14.5px; line-height: 1.55; color: var(--ink-3); max-width: 78ch;
     text-wrap: pretty; }
   .toolbar { display: flex; align-items: center; gap: 10px; padding: 22px 30px 20px; }
+  .toolbar .spacer { flex: 1; }
+  /* The design's file pager: ‹ | File N of M ▾ | ›. Only paged mode shows one
+     file at a time, so all mode hides it. */
+  .file-nav { display: flex; align-items: stretch; border: 1px solid var(--line-3);
+    border-radius: 9px; overflow: hidden; background: var(--panel); }
+  .file-nav button { background: none; border: 0; color: var(--ink); cursor: pointer;
+    font-family: var(--sans); font-size: 13px; font-weight: 500; }
+  .fn-arrow { width: 36px; display: grid; place-items: center; font-size: 15px; }
+  .fn-arrow:first-child { border-right: 1px solid var(--line-3); }
+  .fn-arrow:last-child { border-left: 1px solid var(--line-3); }
+  .file-nav button:hover:not(:disabled) { background: var(--panel-2); }
+  .file-nav button:disabled { color: var(--faintest); cursor: default; }
+  /* A native select laid transparently over the label: real dropdown, keyboard
+     and a11y for free, and the design's look kept — no custom popover. */
+  .fn-label { position: relative; display: flex; align-items: center; gap: 9px;
+    padding: 9px 14px; font-size: 13px; font-weight: 500; color: var(--ink); white-space: nowrap; }
+  .fn-label:hover { background: var(--panel-2); }
+  .fn-label .fn-caret { color: var(--muted-2); font-size: 10px; }
+  .fn-label select { position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: 0; cursor: pointer; font-family: var(--mono); font-size: 12px; }
+  .fn-path { font-family: var(--mono); font-size: 12.5px; color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 42ch;
+    direction: rtl; text-align: left; }
+  .fn-path span { direction: ltr; unicode-bidi: bidi-override; }
   /* The sidebar is the only cohort navigation there is, so when the narrow
      layout drops it, paged mode would strand you on one cohort. This takes
      over there and is redundant while the sidebar is up. */
@@ -357,6 +382,14 @@
     </div>
     <div class="toolbar">
       <label class="coh-pick"><select id="coh-select" onchange="go(+this.value)"></select></label>
+      <span class="file-nav" id="file-nav">
+        <button class="fn-arrow" id="fn-prev" onclick="stepFile(-1)" aria-label="previous file">‹</button>
+        <span class="fn-label"><span id="fn-text">File 1 of 1</span><span class="fn-caret">▾</span>
+          <select id="fn-select" aria-label="choose file in this cohort" onchange="goFile(+this.value)"></select></span>
+        <button class="fn-arrow" id="fn-next" onclick="stepFile(1)" aria-label="next file">›</button>
+      </span>
+      <span class="fn-path" id="fn-path"></span>
+      <span class="spacer"></span>
       <span class="seg"><button id="m-paged" onclick="go(ACTIVE, 'paged')">paged</button><button id="m-all" onclick="go(ACTIVE, 'all')">all cohorts</button></span>
       <span class="seg"><button id="ll" onclick="setFmt('line-by-line')">line-by-line</button><button id="sbs" onclick="setFmt('side-by-side')">side-by-side</button></span>
     </div>
@@ -407,7 +440,8 @@
 
   let FMT = PAGE.format;
   let io = null;              // IntersectionObserver driving lazy cohort render
-  const cohortState = [];     // per-cohort: { sub, parsed, present, rendered }
+  // per-cohort: { subs, parsedSubs, present, hosted, drawn:Set(fi), rendered }
+  const cohortState = [];
 
   // Two ways to read the same cohorts, both linkable as #<mode>/<n>:
   //   paged — one cohort on screen, chosen from the sidebar (the default)
@@ -416,8 +450,13 @@
   // Both modes share one set of section elements and one cohortState, so a
   // cohort drawn in either mode stays drawn, and its Viewed checkboxes (DOM
   // state inside the diff) survive switching cohort or mode.
+  // Paged mode shows one FILE of one cohort, stepped with the ‹ › pager — the
+  // design's unit of reading. AF indexes cohortState[ACTIVE].present (the
+  // files that actually have a block this build), which is also what the
+  // "File N of M" counter counts.
   let MODE = "paged";
   let ACTIVE = 0;
+  let AF = 0;
 
   // Which element actually scrolls: main on desktop, the document once the
   // narrow layout un-pins the shell. Driving main.scrollTop there is a no-op,
@@ -466,7 +505,7 @@
       // own host card in renderCohort, which is what the f-ci-fi anchors and
       // jumpFile rely on.
       const present = c.files.map((p, fi) => fi).filter(fi => subs[fi]);
-      cohortState[ci] = { subs, parsedSubs, present, rendered: false };
+      cohortState[ci] = { subs, parsedSubs, present, rendered: false, hosted: false, drawn: new Set() };
 
       // Partial refs get a "k/M hunks" suffix.
       const label = p => {
@@ -482,7 +521,7 @@
             <span class="chip"><span style="color:var(--stat-add)">+${cAdd}</span> <span style="color:var(--stat-del)">−${cDel}</span></span>
             <span class="dot"></span></div>
         </div>
-        <ul class="nav-files">${c.files.map((p, fi) => `<li onclick="jumpFile(${ci}, ${fi})" title="${esc(p.path)}"><span>${label(p)}</span></li>`).join("")}</ul></div>`);
+        <ul class="nav-files">${c.files.map((p, fi) => `<li id="nf-${ci}-${fi}" onclick="jumpFile(${ci}, ${fi})" title="${esc(p.path)}"><span>${label(p)}</span></li>`).join("")}</ul></div>`);
 
       // Only the section shell (header, stats, empty wrap) is built here; the
       // diff is drawn by renderCohort, on selection in paged mode and on
@@ -512,7 +551,7 @@
     setFmtButtons();
     applyDark();
     const t = parseHash();
-    go(t.ci, t.mode, false);
+    go(t.ci, t.mode, false, t.af);
   }
 
   // renderCohort draws one cohort's diff on demand (idempotent). Splitting the
@@ -520,10 +559,13 @@
   // its own host div: large files are spotted from the parse BEFORE diff2html
   // draws or highlights anything, and get a placeholder instead — the
   // expensive draw runs only if the user expands them.
-  function renderCohort(ci) {
+  // ensureHosts creates one empty card slot per present file. Cheap, and it
+  // has to happen before drawing so a file's card can be shown or hidden
+  // without touching what is already drawn inside it.
+  function ensureHosts(ci) {
     const st = cohortState[ci];
-    if (!st || st.rendered) return;
-    st.rendered = true;
+    if (!st || st.hosted) return;
+    st.hosted = true;
     const wrap = document.getElementById(`wrap-${ci}`);
     wrap.innerHTML = "";
     st.present.forEach(fi => {
@@ -531,11 +573,30 @@
       host.className = "cr-file";
       host.id = `f-${ci}-${fi}`;
       wrap.appendChild(host);
-      const files = st.parsedSubs[fi];
-      if (files.some(isBigFile)) bigFilePlaceholder(host, st.subs[fi], files);
-      else drawDiff(host, st.subs[fi]);
     });
+  }
+
+  // renderFile draws ONE file's diff (idempotent). Paged mode draws only the
+  // file on screen, so opening a ten-file cohort costs one draw, not ten.
+  function renderFile(ci, fi) {
+    const st = cohortState[ci];
+    if (!st || st.drawn.has(fi)) return;
+    ensureHosts(ci);
+    st.drawn.add(fi);
+    const host = document.getElementById(`f-${ci}-${fi}`);
+    const files = st.parsedSubs[fi];
+    if (files.some(isBigFile)) bigFilePlaceholder(host, st.subs[fi], files);
+    else drawDiff(host, st.subs[fi]);
     applyDark();
+  }
+
+  // renderCohort draws every file in a cohort — what all mode's observer wants.
+  function renderCohort(ci) {
+    const st = cohortState[ci];
+    if (!st || st.rendered) return;
+    st.rendered = true;
+    ensureHosts(ci);
+    st.present.forEach(fi => renderFile(ci, fi));
     // A drawn cohort changes every later section's offset, so the scroll spy's
     // last answer is stale. Only all mode has a spy to correct.
     if (MODE === "all") syncActive();
@@ -585,8 +646,10 @@
     FMT = f;
     setFmtButtons();
     cohortState.forEach((st, ci) => {
-      if (!st.rendered) return;
+      if (!st.drawn.size) return;
       st.rendered = false;
+      st.hosted = false;
+      st.drawn.clear();
       document.getElementById(`wrap-${ci}`).innerHTML = "";
     });
     applyMode();
@@ -613,7 +676,15 @@
     COHORTS.forEach((_, i) => { document.getElementById(`coh-${i}`).hidden = !all && i !== ACTIVE; });
     if (io) { io.disconnect(); io = null; }
     if (!all) {
-      renderCohort(ACTIVE);
+      const st = cohortState[ACTIVE];
+      AF = Math.min(Math.max(AF, 0), Math.max(st.present.length - 1, 0));
+      ensureHosts(ACTIVE);
+      // Only the paged file is visible; the rest keep whatever was drawn in
+      // them, so returning to a file keeps its Viewed checkbox.
+      st.present.forEach((fi, i) => {
+        document.getElementById(`f-${ACTIVE}-${fi}`).hidden = i !== AF;
+      });
+      if (st.present.length) renderFile(ACTIVE, st.present[AF]);
     } else if ("IntersectionObserver" in window) {
       io = new IntersectionObserver(entries => {
         for (const e of entries) {
@@ -624,8 +695,57 @@
     } else {
       COHORTS.forEach((_, ci) => renderCohort(ci));
     }
+    // All mode is the long scroll: every card that exists is visible.
+    if (all) COHORTS.forEach((c, ci) => cohortState[ci].present.forEach(fi => {
+      const h = document.getElementById(`f-${ci}-${fi}`);
+      if (h) h.hidden = false;
+    }));
     setFmtButtons();
     syncActive();
+    syncFileNav();
+  }
+
+  // File pager. goFile is navigation like go(): it moves, then records.
+  function goFile(af, push = true) {
+    const st = cohortState[ACTIVE];
+    if (!st.present.length) return;
+    AF = Math.min(Math.max(af, 0), st.present.length - 1);
+    if (MODE === "all") {
+      // No paging in all mode — treat it as "scroll to that file".
+      const el = document.getElementById(`f-${ACTIVE}-${st.present[AF]}`);
+      renderCohort(ACTIVE);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      syncFileNav();
+      return;
+    }
+    applyMode();
+    scroller().scrollTop = 0;
+    const h = `#paged/${ACTIVE + 1}/${AF + 1}`;
+    if (push && location.hash !== h) location.hash = h;
+  }
+  function stepFile(d) { goFile(AF + d); }
+
+  // syncFileNav keeps the pager, its dropdown, and the sidebar file list all
+  // reporting the same file.
+  function syncFileNav() {
+    const st = cohortState[ACTIVE];
+    const n = st ? st.present.length : 0;
+    document.getElementById("file-nav").hidden = MODE !== "paged";
+    document.getElementById("fn-path").hidden = MODE !== "paged";
+    if (!st) return;
+    document.getElementById("fn-text").textContent = `File ${n ? AF + 1 : 0} of ${n}`;
+    document.getElementById("fn-prev").disabled = AF <= 0;
+    document.getElementById("fn-next").disabled = AF >= n - 1;
+    const paths = st.present.map(fi => COHORTS[ACTIVE].files[fi].path);
+    document.getElementById("fn-select").innerHTML =
+      paths.map((path, i) => `<option value="${i}">${i + 1}. ${esc(path)}</option>`).join("");
+    document.getElementById("fn-select").value = AF;
+    document.getElementById("fn-path").innerHTML = n ? `<span>${esc(paths[AF])}</span>` : "";
+    COHORTS.forEach((c, ci) => c.files.forEach((_, fi) => {
+      const li = document.getElementById(`nf-${ci}-${fi}`);
+      if (li) li.classList.toggle("on",
+        MODE === "paged" && ci === ACTIVE && st.present[AF] === fi);
+    }));
   }
 
   // Landing on a cohort in all mode is a moving target. File cards use
@@ -659,9 +779,12 @@
   // go is the single entry point for navigation: it moves, then records where
   // it moved to. Scrolling in all mode does NOT push history — only explicit
   // navigation does, so back/forward stay meaningful.
-  function go(ci, mode = MODE, push = true) {
+  function go(ci, mode = MODE, push = true, af = null) {
     if (!COHORTS[ci]) ci = 0;
     const jumped = mode !== MODE;
+    // A different cohort starts at its first file; re-entering the same one
+    // (a mode flip, say) keeps the file being read.
+    AF = af !== null ? af : (ci === ACTIVE ? AF : 0);
     MODE = mode;
     ACTIVE = ci;
     localStorage.setItem("viewMode", MODE);
@@ -676,29 +799,43 @@
     } else {
       scroller().scrollTop = 0;
     }
-    const h = `#${MODE}/${ci + 1}`;
+    const h = MODE === "paged" ? `#paged/${ci + 1}/${AF + 1}` : `#all/${ci + 1}`;
     if (push && location.hash !== h) location.hash = h;
   }
 
   // Hash wins on load; otherwise the last mode used, like the theme.
+  // #paged/<cohort>/<file>, or #all/<cohort>. The file part is optional so an
+  // older #paged/3 link still resolves, to that cohort's first file.
   function parseHash() {
-    const m = /^#(paged|all)\/(\d+)$/.exec(location.hash);
-    if (m) return { mode: m[1], ci: Math.min(Math.max(+m[2] - 1, 0), COHORTS.length - 1) };
-    return { mode: localStorage.getItem("viewMode") === "all" ? "all" : "paged", ci: 0 };
+    const m = /^#(paged|all)\/(\d+)(?:\/(\d+))?$/.exec(location.hash);
+    if (m) return {
+      mode: m[1],
+      ci: Math.min(Math.max(+m[2] - 1, 0), COHORTS.length - 1),
+      af: m[3] ? Math.max(+m[3] - 1, 0) : 0,
+    };
+    return { mode: localStorage.getItem("viewMode") === "all" ? "all" : "paged", ci: 0, af: 0 };
   }
   addEventListener("hashchange", () => {
     const t = parseHash();
     // go() sets the hash itself; re-entering for a move already made would
-    // undo the scroll jumpFile just did.
-    if (t.mode !== MODE || t.ci !== ACTIVE) go(t.ci, t.mode, false);
+    // undo the scroll it just did.
+    if (t.mode !== MODE || t.ci !== ACTIVE || (t.mode === "paged" && t.af !== AF)) {
+      go(t.ci, t.mode, false, t.af);
+    }
   });
 
-  // Jump to one file's diff card; falls back to the cohort header when the
-  // file has no rendered block (e.g. its hunks were absent from the diff).
+  // Sidebar file click. In paged mode that means "page to this file"; in all
+  // mode it stays a scroll. A file with no block this build (its hunks render
+  // at an earlier cohort's ref) isn't in present — fall back to the cohort.
   function jumpFile(ci, fi) {
+    const af = cohortState[ci].present.indexOf(fi);
+    if (af < 0) { go(ci); return; }
+    if (MODE === "paged") { go(ci, MODE, true, af); return; }
     go(ci);
+    AF = af;
     const el = document.getElementById(`f-${ci}-${fi}`) || document.getElementById(`coh-${ci}`);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    syncFileNav();
   }
   function toggleTheme() {
     const light = effectiveDark();
