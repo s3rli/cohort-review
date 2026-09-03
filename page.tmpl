@@ -145,7 +145,7 @@
   .pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px 5px 9px;
     border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 12.5px;
     font-weight: 600; flex: none; margin-top: 2px; }
-  .tb-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .tb-main { flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
   .tb-title { margin: 0; font-size: 16.5px; font-weight: 600; letter-spacing: -.01em;
     color: var(--ink-hi); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tb-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-family: var(--mono);
@@ -153,9 +153,12 @@
   .tb-meta .sep { color: var(--faintest); }
   .tb-meta .repo { display: flex; align-items: center; gap: 6px; }
   .tb-meta .repo i { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--muted-2); }
-  .tb-actions { display: flex; align-items: center; gap: 8px; flex: none; }
-  .loadf { display: flex; gap: 6px; }
-  .loadf input { font-family: var(--mono); font-size: 12.5px; width: 244px; padding: 8px 12px;
+  .tb-actions { display: flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0; }
+  .loadf { display: flex; gap: 6px; flex: 0 1 auto; min-width: 0; }
+  /* Shrinks before the PR title does — at 150% zoom a fixed width here left
+     the title as three ellipsised characters. */
+  .loadf input { font-family: var(--mono); font-size: 12.5px; flex: 0 1 244px; width: 244px;
+    min-width: 108px; padding: 8px 12px;
     background: var(--panel); color: var(--ink); border: 1px solid var(--line-3); border-radius: 8px; }
   .loadf input::placeholder { color: var(--muted-2); }
   .loadf input:focus { outline: none; border-color: var(--accent); }
@@ -205,6 +208,13 @@
   .walk { margin: 0; font-size: 14.5px; line-height: 1.55; color: var(--ink-3); max-width: 78ch;
     text-wrap: pretty; }
   .toolbar { display: flex; align-items: center; gap: 10px; padding: 22px 30px 20px; }
+  /* The sidebar is the only cohort navigation there is, so when the narrow
+     layout drops it, paged mode would strand you on one cohort. This takes
+     over there and is redundant while the sidebar is up. */
+  .coh-pick { display: none; }
+  .coh-pick select { font-family: var(--mono); font-size: 12.5px; padding: 9px 12px; width: 100%;
+    background: var(--panel); color: var(--ink); border: 1px solid var(--line-3);
+    border-radius: 9px; cursor: pointer; }
   .seg { display: flex; align-items: stretch; border: 1px solid var(--line-3); border-radius: 9px;
     overflow: hidden; background: var(--panel); }
   .seg button { background: none; border: 0; color: var(--muted); font-family: var(--mono);
@@ -291,11 +301,14 @@
   .loading { color: var(--muted); font-family: var(--mono); font-size: 13px; padding: 40px 30px; }
 
   @media (max-width: 900px) {
-    .app { display: block; overflow-y: auto; }
+    /* The document scrolls here, not main — see scroller() in the script. */
+    .app { display: block; }
     body { height: auto; overflow: visible; }
     .sidebar, .rsz { display: none; }
     main { overflow: visible; }
     .topbar { flex-wrap: wrap; }
+    .tb-actions { flex: 1 1 100%; }
+    .coh-pick { display: flex; flex: 1 1 auto; min-width: 0; }
     .cohort, .toolbar, .intro { padding-left: 16px; padding-right: 16px; }
   }
 </style>
@@ -343,6 +356,7 @@
       <p class="walk" id="walk"></p>
     </div>
     <div class="toolbar">
+      <label class="coh-pick"><select id="coh-select" onchange="go(+this.value)"></select></label>
       <span class="seg"><button id="m-paged" onclick="go(ACTIVE, 'paged')">paged</button><button id="m-all" onclick="go(ACTIVE, 'all')">all cohorts</button></span>
       <span class="seg"><button id="ll" onclick="setFmt('line-by-line')">line-by-line</button><button id="sbs" onclick="setFmt('side-by-side')">side-by-side</button></span>
     </div>
@@ -404,6 +418,20 @@
   // state inside the diff) survive switching cohort or mode.
   let MODE = "paged";
   let ACTIVE = 0;
+
+  // Which element actually scrolls: main on desktop, the document once the
+  // narrow layout un-pins the shell. Driving main.scrollTop there is a no-op,
+  // which silently broke every navigation path below 900px.
+  function scroller() {
+    const m = document.getElementById("main");
+    const ov = getComputedStyle(m).overflowY;
+    return ov === "auto" || ov === "scroll" ? m : document.scrollingElement;
+  }
+  // Offset of an element from the top of whatever is scrolling.
+  function topWithin(el, sc) {
+    const base = sc === document.scrollingElement ? 0 : sc.getBoundingClientRect().top;
+    return el.getBoundingClientRect().top - base;
+  }
 
   function build() {
     document.title = PAGE.title + " — cohort review";
@@ -473,6 +501,8 @@
         </section>`);
     });
 
+    document.getElementById("coh-select").innerHTML =
+      COHORTS.map((c, ci) => `<option value="${ci}">${ci + 1}. ${esc(c.name)}</option>`).join("");
     document.getElementById("coh-count").textContent = COHORTS.length;
     document.getElementById("meta").innerHTML =
       `<span class="repo"><i></i>cohort review</span><span class="sep">·</span>` +
@@ -605,7 +635,7 @@
   // the target stops moving, and get out of the way the moment the user scrolls.
   let settleToken = 0;
   function scrollToCohort(ci) {
-    const main = document.getElementById("main");
+    const sc = scroller();
     const el = document.getElementById(`coh-${ci}`);
     el.scrollIntoView({ block: "start" });
     const mine = ++settleToken;
@@ -616,9 +646,9 @@
     let tries = 25;
     const step = () => {
       if (mine !== settleToken || tries-- <= 0) return;
-      const top = el.getBoundingClientRect().top - main.getBoundingClientRect().top;
+      const top = topWithin(el, sc);
       if (Math.abs(top) < 2) return;
-      main.scrollTop += top;
+      sc.scrollTop += top;
       setTimeout(step, 40);
     };
     setTimeout(step, 0);
@@ -644,7 +674,7 @@
       for (let i = 0; i <= ci; i++) renderCohort(i);
       scrollToCohort(ci);
     } else {
-      document.getElementById("main").scrollTop = 0;
+      scroller().scrollTop = 0;
     }
     const h = `#${MODE}/${ci + 1}`;
     if (push && location.hash !== h) location.hash = h;
@@ -682,25 +712,27 @@
   // is the answer.
   function syncActive() {
     if (MODE === "all") {
-      const main = document.getElementById("main");
-      const mt = main.getBoundingClientRect().top;
+      const sc = scroller();
       COHORTS.forEach((_, ci) => {
         const el = document.getElementById(`coh-${ci}`);
-        if (el && el.getBoundingClientRect().top - mt <= 90) ACTIVE = ci;
+        if (el && topWithin(el, sc) <= 90) ACTIVE = ci;
       });
     }
     COHORTS.forEach((_, ci) => {
       const row = document.getElementById(`nch-${ci}`);
       if (row) row.classList.toggle("on", ci === ACTIVE);
     });
+    document.getElementById("coh-select").value = ACTIVE;
   }
   {
     let queued = false;
-    document.getElementById("main").addEventListener("scroll", () => {
+    const onScroll = () => {
       if (MODE !== "all" || queued) return;
       queued = true;
       requestAnimationFrame(() => { queued = false; syncActive(); });
-    }, { passive: true });
+    };
+    document.getElementById("main").addEventListener("scroll", onScroll, { passive: true });
+    addEventListener("scroll", onScroll, { passive: true });
   }
 
   // Sidebar resize: drag the right edge; the chosen width persists.
