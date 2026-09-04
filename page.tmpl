@@ -473,6 +473,28 @@
   let ACTIVE = 0;
   let AF = 0;
 
+  // The Viewed checkbox is diff2html's own DOM, so any redraw — a layout flip
+  // rebuilds the markup, since the format is baked into it — loses the mark.
+  // Remember the paths instead, keyed by PR so two PRs don't share marks.
+  const VIEWED_KEY = `viewed:${PAGE.url || PAGE.title}`;
+  let viewed = new Set();
+  try { viewed = new Set(JSON.parse(localStorage.getItem(VIEWED_KEY) || "[]")); } catch (e) {}
+  function saveViewed() {
+    try { localStorage.setItem(VIEWED_KEY, JSON.stringify([...viewed])); } catch (e) {}
+  }
+  // bindViewed wires one freshly drawn card: record changes, and restore a
+  // previous mark. click() rather than checked=true so diff2html's own handler
+  // does the collapsing — a restored mark behaves exactly like a clicked one.
+  function bindViewed(host, path) {
+    const box = host.querySelector(".d2h-file-collapse-input");
+    if (!box) return;
+    box.addEventListener("change", () => {
+      if (box.checked) viewed.add(path); else viewed.delete(path);
+      saveViewed();
+    });
+    if (viewed.has(path) && !box.checked) box.click();
+  }
+
   // Which element actually scrolls: main on desktop, the document once the
   // narrow layout un-pins the shell. Driving main.scrollTop there is a no-op,
   // which silently broke every navigation path below 900px.
@@ -601,8 +623,9 @@
     st.drawn.add(fi);
     const host = document.getElementById(`f-${ci}-${fi}`);
     const files = st.parsedSubs[fi];
-    if (files.some(isBigFile)) bigFilePlaceholder(host, st.subs[fi], files);
-    else drawDiff(host, st.subs[fi]);
+    const path = COHORTS[ci].files[fi].path;
+    if (files.some(isBigFile)) bigFilePlaceholder(host, st.subs[fi], files, path);
+    else { drawDiff(host, st.subs[fi]); bindViewed(host, path); }
     applyDark();
   }
 
@@ -641,7 +664,7 @@
 
   // bigFilePlaceholder stands in for a large file's card; clicking "show"
   // draws the real diff in place.
-  function bigFilePlaceholder(host, sub, files) {
+  function bigFilePlaceholder(host, sub, files, path) {
     const add = files.reduce((s, f) => s + (f.addedLines || 0), 0);
     const del = files.reduce((s, f) => s + (f.deletedLines || 0), 0);
     host.innerHTML = `<div class="cr-big"><div class="cr-name">
@@ -652,7 +675,9 @@
       <button class="cr-show">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 5.5 8 10.5l5-5" stroke="currentColor" stroke-width="1.6"></path></svg>
         show large diff</button></div>`;
-    host.querySelector(".cr-show").onclick = () => { drawDiff(host, sub); applyDark(); };
+    host.querySelector(".cr-show").onclick = () => {
+      drawDiff(host, sub); bindViewed(host, path); applyDark();
+    };
   }
 
   // Layout is the only thing that changes, and the parsed subs don't depend on
@@ -711,6 +736,7 @@
     } else {
       COHORTS.forEach((_, ci) => renderCohort(ci));
     }
+    if (all) startBackfill(); else cancelBackfill();
     // All mode is the long scroll: every card that exists is visible.
     if (all) COHORTS.forEach((c, ci) => cohortState[ci].present.forEach(fi => {
       const h = document.getElementById(`f-${ci}-${fi}`);
@@ -770,6 +796,7 @@
   // down — a plain scrollIntoView lands thousands of pixels short. Nudge until
   // the target stops moving, and get out of the way the moment the user scrolls.
   let settleToken = 0;
+  let settling = false;
   function scrollToCohort(ci) {
     const sc = scroller();
     const el = document.getElementById(`coh-${ci}`);
@@ -780,10 +807,11 @@
     // the next measurement means anything. A tall viewport resolves far more
     // per step than a frame budget could absorb.
     let tries = 25;
+    settling = true;
     const step = () => {
-      if (mine !== settleToken || tries-- <= 0) return;
+      if (mine !== settleToken || tries-- <= 0) { settling = false; return; }
       const top = topWithin(el, sc);
-      if (Math.abs(top) < 2) return;
+      if (Math.abs(top) < 2) { settling = false; return; }
       sc.scrollTop += top;
       setTimeout(step, 40);
     };
@@ -791,6 +819,43 @@
   }
   ["wheel", "touchstart", "keydown"].forEach(t =>
     addEventListener(t, () => settleToken++, { passive: true }));
+
+  // All mode exists so find-in-page can reach the whole PR, but the observer
+  // only draws what you scroll past — everything else is the string
+  // "rendering…", which no search can match. So the rest is filled in while the
+  // browser is idle, one cohort at a time.
+  //
+  // Drawing a cohort ABOVE the viewport would shift what you are reading, so an
+  // anchor element is re-pinned after every draw. NOTE: large files stay
+  // collapsed behind their placeholder, so their text is still not searchable —
+  // that is the deliberate guard against one blob blowing up the page.
+  const idle = window.requestIdleCallback || (fn => setTimeout(fn, 60));
+  const unidle = window.cancelIdleCallback || clearTimeout;
+  let backfillHandle = null;
+  function startBackfill() {
+    if (backfillHandle === null) backfillHandle = idle(backfillStep, { timeout: 1200 });
+  }
+  function cancelBackfill() {
+    if (backfillHandle !== null) { unidle(backfillHandle); backfillHandle = null; }
+  }
+  function backfillStep() {
+    backfillHandle = null;
+    if (MODE !== "all") return;
+    // Never move the page while a jump is still settling onto its target.
+    if (settling) { startBackfill(); return; }
+    const next = cohortState.findIndex(st => !st.rendered);
+    if (next < 0) return;
+    const sc = scroller();
+    // Hold the element by reference: renderCohort re-runs syncActive, which
+    // reassigns ACTIVE, so re-reading it after the draw would anchor to a
+    // different section than we measured.
+    const anchor = document.getElementById(`coh-${ACTIVE}`);
+    const before = topWithin(anchor, sc);
+    renderCohort(next);
+    sc.scrollTop += topWithin(anchor, sc) - before;
+    syncActive();
+    startBackfill();
+  }
 
   // go is the single entry point for navigation: it moves, then records where
   // it moved to. Scrolling in all mode does NOT push history — only explicit
