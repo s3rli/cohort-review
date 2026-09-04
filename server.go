@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"strconv"
 	"sync"
+	"time"
 )
 
 //go:embed assets/diff2html.min.js assets/diff2html.min.css assets/diff2html-ui.min.js assets/github.min.css assets/github-dark.min.css
@@ -31,6 +32,8 @@ type app struct {
 	budget int
 	format string
 
+	metrics string // JSONL runs file; "" disables
+
 	mu   sync.RWMutex
 	page []byte
 	diff string
@@ -42,29 +45,47 @@ type app struct {
 }
 
 // load fetches a PR, groups its diff, renders the page, and atomically swaps
-// the served state. On error the previous state stays untouched.
+// the served state. On error the previous state stays untouched. Every load
+// attempt appends at least one metrics record (best-effort): a full record
+// once grouping finishes, plus a minimal {ts,pr,error} line on any failure —
+// so a render failure after a good grouping writes both.
 func (a *app) load(ctx context.Context, ref PRRef) error {
+	fail := func(err error) error {
+		// Failed runs are recorded too — the degraded path must not vanish
+		// from the stats (handoff W4).
+		if a.metrics != "" {
+			_ = appendJSONL(a.metrics, runRecord{
+				TS: time.Now().UTC().Format(time.RFC3339), PR: prID(ref), Error: err.Error()})
+		}
+		return err
+	}
 	fmt.Fprintf(os.Stderr, "fetching PR #%d from %s/%s…\n", ref.Number, ref.Workspace, ref.Repo)
 	pr, err := a.client.FetchPR(ctx, ref)
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	diff, err := a.client.FetchDiff(ctx, ref)
 	if err != nil {
-		return err
+		return fail(err)
 	}
-	segs := SplitUnifiedDiff(diff)
+	segs := recoverSegmentPaths(SplitUnifiedDiff(diff))
 	paths := segmentPaths(segs)
 	if len(paths) == 0 {
-		return errors.New("PR has no diff to review")
+		return fail(errors.New("PR has no diff to review"))
 	}
 	fmt.Fprintf(os.Stderr, "diff: %d files, %d KB\n", len(paths), len(diff)/1024)
 	fmt.Fprintf(os.Stderr, "grouping into cohorts (model %s)…\n", a.model)
+	start := time.Now()
 	g := groupCohorts(ctx, a.group, pr, segs, a.budget)
 	fmt.Fprintf(os.Stderr, "%d cohorts\n", len(g.Cohorts))
+	if a.metrics != "" {
+		if err := appendJSONL(a.metrics, computeRecord(ref, a.model, pr, g, segs, time.Since(start).Seconds())); err != nil {
+			fmt.Fprintf(os.Stderr, "cohort-review: metrics: %v\n", err)
+		}
+	}
 	page, err := renderPage(pr, g, a.format, a.nextVersion())
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	a.mu.Lock()
 	a.version++
@@ -121,6 +142,24 @@ func renderPage(pr PullRequest, g Grouping, format string, version int) ([]byte,
 // being inlined in the HTML: a diff can contain a literal </script>, which
 // would terminate any inline block; a plain-text response has no escaping
 // surface at all.
+// localOnly rejects requests whose Host is not a loopback literal. The server
+// binds 127.0.0.1, but a browser will still send a rebound attacker hostname
+// there — and the diff it would then read may be proprietary. Checking Host
+// costs nothing and closes DNS rebinding.
+func localOnly(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.Host)
+		if err != nil {
+			host = r.Host
+		}
+		if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+			http.Error(w, "cohort-review serves 127.0.0.1 only", http.StatusForbidden)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
 func (a *app) mux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +196,18 @@ func (a *app) mux() *http.ServeMux {
 // Synchronous — the browser waits out the grouping call, then is redirected
 // back to /. On any failure the currently served PR is left as-is.
 func (a *app) handleLoad(w http.ResponseWriter, r *http.Request) {
-	ref, err := parsePRRef(r.URL.Query().Get("pr"))
+	// POST only: a GET here is reachable from any page the reviewer opens
+	// (a link or an <img> in the PR description itself) and swaps the served
+	// PR out from under them.
+	if r.Method != http.MethodPost {
+		http.Error(w, "use POST", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	ref, err := parsePRRef(r.FormValue("pr"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -200,7 +250,7 @@ func serve(a *app, port int, openBrowser bool) int {
 			fmt.Fprintf(os.Stderr, "cohort-review: could not open browser: %v\n", err)
 		}
 	}
-	if err := http.Serve(ln, a.mux()); err != nil {
+	if err := http.Serve(ln, localOnly(a.mux())); err != nil {
 		fmt.Fprintf(os.Stderr, "cohort-review: serve: %v\n", err)
 		return 1
 	}

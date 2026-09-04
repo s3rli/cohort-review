@@ -78,3 +78,81 @@ func TestDeriveNameStatus(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+func TestSegmentStat(t *testing.T) {
+	cases := []struct {
+		raw     string
+		status  string
+		added   int
+		deleted int
+	}{
+		{"diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-x\n+y\n", "M", 1, 1},
+		{"diff --git a/n.go b/n.go\nnew file mode 100644\n+++ b/n.go\n@@ -0,0 +1,2 @@\n+a\n+b\n", "A", 2, 0},
+		{"diff --git a/d.go b/d.go\ndeleted file mode 100644\n--- a/d.go\n@@ -1,2 +0,0 @@\n-a\n-b\n", "D", 0, 2},
+		{"diff --git a/o.go b/r.go\nrename from o.go\nrename to r.go\n", "R", 0, 0},
+		// Inside a hunk, "+++"/"---" lines are ordinary changes whose content
+		// starts with "++"/"--" — not file headers, which cannot appear after
+		// the first "@@ ". Counting them as churn is what the fold share guard
+		// and metrics depend on.
+		{"diff --git a/p.patch b/p.patch\n--- a/p.patch\n+++ b/p.patch\n@@ -1,4 +1,4 @@\n+++ b/inner.go\n--- a/inner.go\n+real\n-gone\n", "M", 2, 2},
+		// The reachable real-world shapes: prefix increment/decrement in
+		// C-like code, and a removed YAML/front-matter "---" separator.
+		{"diff --git a/x.js b/x.js\n--- a/x.js\n+++ b/x.js\n@@ -1,2 +1,2 @@\n+++counter;\n---counter;\n", "M", 1, 1},
+		{"diff --git a/c.yml b/c.yml\n--- a/c.yml\n+++ b/c.yml\n@@ -1 +1 @@\n----\n+key: v\n", "M", 1, 1},
+		// Pins the inHunk gate: nothing before the first "@@ " counts.
+		{"diff --git a/w.go b/w.go\n-preamble noise\n--- a/w.go\n+++ b/w.go\n@@ -1 +1 @@\n+y\n", "M", 1, 0},
+	}
+	for _, c := range cases {
+		status, added, deleted := segmentStat(FileSegment{Path: "p", Raw: c.raw})
+		if status != c.status || added != c.added || deleted != c.deleted {
+			t.Errorf("segmentStat(%.30q) = %s +%d/-%d, want %s +%d/-%d",
+				c.raw, status, added, deleted, c.status, c.added, c.deleted)
+		}
+	}
+}
+
+// TestRecoverSegmentPaths pins that files with no ---/+++ headers — binary
+// changes, pure renames, mode-only changes — are still named. Without this a
+// PR made only of such files looks like it has no diff at all.
+func TestRecoverSegmentPaths(t *testing.T) {
+	cases := []struct{ raw, want string }{
+		{"diff --git a/img/run.png b/img/run.png\ndeleted file mode 100644\nBinary files a/img/run.png and /dev/null differ\n", "img/run.png"},
+		{"diff --git a/old.go b/new.go\nsimilarity index 100%\nrename from old.go\nrename to new.go\n", "new.go"},
+		{"diff --git a/s.sh b/s.sh\nold mode 100644\nnew mode 100755\n", "s.sh"},
+		{"diff --git a/has space.txt b/has space.txt\nBinary files differ\n", "has space.txt"},
+		// Git C-quotes unusual paths; decoding them is what keeps such a file
+		// visible at all (see TestRecoverSegmentPathsQuoted).
+		{"diff --git \"a/od\\303\\251.txt\" \"b/od\\303\\251.txt\"\nBinary files differ\n", "odé.txt"},
+		// Preamble content is not a file and must stay empty.
+		{"warning: something\n", ""},
+	}
+	for _, c := range cases {
+		got := recoverSegmentPaths([]FileSegment{{Raw: c.raw}})[0].Path
+		if got != c.want {
+			t.Errorf("recoverSegmentPaths(%.40q) = %q, want %q", c.raw, got, c.want)
+		}
+	}
+	// An already-resolved path is never overwritten.
+	segs := recoverSegmentPaths([]FileSegment{{Path: "real.go", Raw: "diff --git a/other.go b/other.go\n"}})
+	if segs[0].Path != "real.go" {
+		t.Errorf("existing path overwritten: %q", segs[0].Path)
+	}
+}
+
+// TestRecoverSegmentPathsQuoted pins the C-quoted case: git quotes paths with
+// non-ASCII bytes by default, and it quotes the ---/+++ headers too, so an
+// undecoded quoted path leaves the file with no path at all — invisible to the
+// changed-files list, the prompt and the page while everything else renders.
+func TestRecoverSegmentPathsQuoted(t *testing.T) {
+	quoted := "diff --git \"a/\\303\\272til.go\" \"b/\\303\\272til.go\"\n" +
+		"--- \"a/\\303\\272til.go\"\n+++ \"b/\\303\\272til.go\"\n@@ -1 +1 @@\n-a\n+b\n"
+	got := recoverSegmentPaths([]FileSegment{{Raw: quoted}})[0].Path
+	if got != "útil.go" {
+		t.Errorf("quoted path = %q, want %q", got, "útil.go")
+	}
+	// A quoted rename keeps the new-side path.
+	ren := "diff --git \"a/\\303\\241.go\" \"b/\\303\\251.go\"\nrename from \"\\303\\241.go\"\nrename to \"\\303\\251.go\"\n"
+	if got := recoverSegmentPaths([]FileSegment{{Raw: ren}})[0].Path; got != "é.go" {
+		t.Errorf("quoted rename = %q, want %q", got, "é.go")
+	}
+}

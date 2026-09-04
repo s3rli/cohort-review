@@ -282,6 +282,16 @@
   .coh-sum { margin: 10px 0 20px; padding-left: 23px; font-size: 14.5px; line-height: 1.55;
     color: var(--ink-3); max-width: 78ch; text-wrap: pretty; }
   .coh-pending { color: var(--muted); font-family: var(--mono); font-size: 12px; padding: 16px 4px; }
+  /* Cohort type: what KIND of reading a cohort asks for. "claim" is the
+     default and stays unlabelled; the rest each change the reading. */
+  .kpill { padding: 3px 8px; border-radius: 6px; font-family: var(--mono); font-size: 11.5px;
+    white-space: nowrap; border: 1px solid var(--chip-line); background: var(--chip-bg); color: var(--ink-2); }
+  .kpill.nonfix { color: var(--accent); border-color: var(--accent-soft); background: var(--accent-soft); }
+  .kpill.misc { color: var(--stat-del); border-color: var(--stat-del); }
+  .cohort.misc .coh-head h2 { color: var(--stat-del); }
+  .coh-claim { margin: -12px 0 20px; padding-left: 23px; font-size: 13.5px; line-height: 1.5;
+    color: var(--ink-2); max-width: 78ch; text-wrap: pretty; }
+  .coh-claim b { font-weight: 600; color: var(--accent); }
 
   /* Structural diff2html overrides — the parts its custom properties don't
      reach (metrics, radii, and the split between gutter and code tints). */
@@ -373,7 +383,7 @@
   </div>
   <div class="tb-actions">
     <a class="btn" id="pr-link" target="_blank" rel="noopener" hidden>view on Bitbucket ↗</a>
-    <form class="loadf" action="/load"
+    <form class="loadf" method="post" action="/load"
       onsubmit="const b=this.querySelector('button'); b.disabled=true; b.textContent='grouping…';">
       <input name="pr" required placeholder="switch PR: paste bitbucket URL">
       <button class="btn">load</button>
@@ -438,12 +448,15 @@
   // fileBlocks: path → {block, parts}. parts mirrors Go's splitSegmentHunks:
   // parts[0] is the file header, hunk N is parts[N]. parts = null marks the
   // path unsplittable — hunk refs then render the whole block instead.
-  let fileBlocks = {};
+  // Null-prototype: a file legitimately named __proto__ or constructor would
+  // otherwise collide with Object.prototype — renderedWhole[path] reads truthy
+  // before anything is rendered, and subFor would skip that file's diff.
+  let fileBlocks = Object.create(null);
 
   // Paths whose whole block was already emitted this build: an unsplittable
   // path referenced from several cohorts renders at its FIRST ref only, so the
   // full diff stays on the page exactly once. Reset by every build().
-  let renderedWhole = {};
+  let renderedWhole = Object.create(null);
 
   // markUnsplittable runs once, BEFORE any rendering: an out-of-range hunk
   // index means our split disagrees with the server's ground truth, so the
@@ -559,6 +572,17 @@
     return el.getBoundingClientRect().top - base;
   }
 
+  // Cohort types come from the server-side enum (validType), so they are safe
+  // as class names. "claim" is the default and gets no badge; the untyped
+  // fallback bucket gets none either.
+  const TYPES = { mechanical: "mechanical", deletion: "deletion", nonfix: "nonfix", misc: "undeclared ⚠" };
+  const TYPE_HELP = {
+    mechanical: "Repeated same-shape churn — folded members were grouped by path and size, not by comparing contents",
+    deletion: "Deleted files — is the removal complete, who inherits the coverage, what is the transition risk?",
+    nonfix: "Pins current behavior instead of changing it — review the decision not to fix",
+    misc: "Not declared by the PR description — ask the author",
+  };
+
   function build() {
     document.title = PAGE.title + " — cohort review";
     document.getElementById("pr-title").textContent = PAGE.title;
@@ -576,7 +600,7 @@
     const nav = document.getElementById("nav");
     const sections = document.getElementById("sections");
     nav.innerHTML = ""; sections.innerHTML = "";
-    renderedWhole = {};
+    renderedWhole = Object.create(null);
     if (io) io.disconnect();
     cohortState.length = 0;
     let tAdd = 0, tDel = 0;
@@ -606,10 +630,11 @@
         return esc(p.path) + m;
       };
       const n = String(ci + 1);
+      const ctype = Object.hasOwn(TYPES, c.type) ? c.type : "";
       nav.insertAdjacentHTML("beforeend",
         `<div class="nav-coh" style="--coh:${c.color}"><div class="nch" id="nch-${ci}" onclick="go(${ci})">
           <div class="nch-top"><span class="nch-n">${n}</span><span class="nch-t">${esc(c.name)}</span></div>
-          <div class="nch-chips"><span class="chip">${c.files.length} files</span>
+          <div class="nch-chips">${ctype ? `<span class="kpill ${ctype}" title="${TYPE_HELP[ctype]}">${TYPES[ctype]}</span>` : ""}<span class="chip">${c.files.length} files</span>
             <span class="chip"><span style="color:var(--stat-add)">+${cAdd}</span> <span style="color:var(--stat-del)">−${cDel}</span></span>
             <span class="dot"></span></div>
         </div>
@@ -619,15 +644,17 @@
       // diff is drawn by renderCohort, on selection in paged mode and on
       // approach in all mode. Hidden until applyMode decides.
       sections.insertAdjacentHTML("beforeend",
-        `<section class="cohort" id="coh-${ci}" data-ci="${ci}" style="--coh:${c.color}" hidden>
+        `<section class="cohort${ctype ? " " + ctype : ""}" id="coh-${ci}" data-ci="${ci}" style="--coh:${c.color}" hidden>
           <div class="coh-head">
             <span class="coh-n">${n}</span>
             <h2>${esc(c.name)}</h2>
+            ${ctype ? `<span class="kpill ${ctype}" title="${TYPE_HELP[ctype]}">${TYPES[ctype]}</span>` : ""}
             <span class="coh-stat"><span style="color:var(--stat-add)">+${cAdd}</span>
               <span style="color:var(--stat-del)">−${cDel}</span>
               <span>${parsed.length} files</span></span>
           </div>
-          <p class="coh-sum">${esc(c.summary)}</p>
+          <p class="coh-sum">${esc(c.summary || "")}</p>
+          ${c.claim ? `<p class="coh-claim"><b>claim</b> ${esc(c.claim)}</p>` : ""}
           <div class="d2h-wrap" id="wrap-${ci}"><div class="coh-pending">rendering…</div></div>
         </section>`);
     });

@@ -34,6 +34,7 @@ Fetches the diff, groups it into cohorts (~10–60s), prints a `http://127.0.0.1
 | `--model` | `sonnet` | claude model for grouping |
 | `--budget` | `204800` | max chars of diff hunks sent to the model |
 | `--format` | `line-by-line` | initial layout, or `side-by-side` |
+| `--metrics` | `~/.cohort-review/runs.jsonl` | append a JSON record per load attempt (misc_lines_pct, folded_lines_pct, anchor stats, cohort types) to `<path>`; empty disables |
 
 ### In the page
 
@@ -54,6 +55,10 @@ The current cohort and file are in the URL — `#paged/<cohort>/<file>`, or `#al
 
 Layout, theme, expand and Viewed marks are kept in `localStorage`, which browsers scope to the origin — and the origin includes the port. That is why `--port` has a fixed default: on a different port none of it carries over. If the default port is busy the server falls back to a free one and says so.
 
+## Cohort types
+
+Cohorts carry a type: **claim** (answer the one-question claim), **mechanical** (repeated same-shape churn — lockfiles, generated files, formatting; when folded, members were grouped by path and size, not by comparing contents, so the representative stands in for shape, not for content), **deletion** (deleted files — answer the three deletion questions), **nonfix** (review the decision not to fix), **misc** (undeclared by the description — floats first; ask the author). Untyped cohorts are grouping fallbacks.
+
 ## Notes
 
 - Grouping never blocks the page: if the LLM call fails or returns garbage (retried once), everything renders under a single "All changes" cohort.
@@ -61,4 +66,6 @@ Layout, theme, expand and Viewed marks are kept in `localStorage`, which browser
 - Rendering is deferred: paged mode draws only the file on screen, and all-cohorts mode draws what you scroll past, then fills in the rest while the browser is idle so find-in-page reaches everything. Large or generated files (lockfiles, minified assets, very large hunks) stay behind a `show large diff` placeholder — and so stay out of find-in-page until expanded.
 - Diffs over the budget still group **all** files — overflow files' hunks are trimmed to their leading hunks (or omitted entirely) in the model input; the rendered page always shows the full diff.
 - Server binds 127.0.0.1 only.
+- Repeated churn is folded out of the model input — piles of deleted files, and ≥5 same-directory/same-extension/same-size files reduced to one representative — so the model sees a summary line instead of their hunks. Same-shape folding backs off when a group would hide more than half the PR: at that point the group is the change itself, not repetition around it. The rendered page always shows the full diff.
 - Small pieces are copied from the internal `code-review-agent` repo (marked with provenance headers) pending same-source convergence.
+- `make golden` replays the three stored golden PRs for human comparison (see `testdata/golden/`).

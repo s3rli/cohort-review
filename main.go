@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -30,6 +31,11 @@ func run(args []string) int {
 	model := fs.String("model", "sonnet", "claude model for grouping")
 	budget := fs.Int("budget", defaultBudget, "max chars of diff hunks sent to the model")
 	format := fs.String("format", "line-by-line", "initial diff layout: line-by-line | side-by-side")
+	defMetrics := ""
+	if home, err := os.UserHomeDir(); err == nil {
+		defMetrics = filepath.Join(home, ".cohort-review", "runs.jsonl")
+	}
+	metrics := fs.String("metrics", defMetrics, "append a JSONL record per load attempt here (empty disables)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "usage: cohort-review [flags] <https://bitbucket.org/{ws}/{repo}/pull-requests/{n}>\n")
 		fs.PrintDefaults()
@@ -77,11 +83,12 @@ func run(args []string) int {
 	var loadErr error
 	for i, c := range pairs {
 		a = &app{
-			client: NewClient(c.user, c.password, ""),
-			group:  group,
-			model:  *model,
-			budget: *budget,
-			format: *format,
+			client:  NewClient(c.user, c.password, ""),
+			group:   group,
+			model:   *model,
+			budget:  *budget,
+			format:  *format,
+			metrics: *metrics,
 		}
 		loadErr = a.load(context.Background(), ref)
 		if !errors.Is(loadErr, errUnauthorized) {

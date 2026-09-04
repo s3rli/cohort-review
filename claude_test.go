@@ -50,3 +50,17 @@ func TestExtractClaudeResult(t *testing.T) {
 		t.Errorf("array without result: got %q", got)
 	}
 }
+
+func TestExtractClaudeResultArrayEnvelope(t *testing.T) {
+	// claude CLI 2.x emits an array of message objects; the answer lives in
+	// the "type":"result" element (observed on 2.1.252).
+	out := `[{"type":"system","subtype":"init"},{"type":"assistant"},{"is_error":false,"subtype":"success","result":"{\"walkthrough\": \"w\", \"cohorts\": []}","type":"result"}]`
+	if got := extractClaudeResult([]byte(out)); got != `{"walkthrough": "w", "cohorts": []}` {
+		t.Errorf("array envelope not unwrapped: %q", got)
+	}
+	// An array with no result element stays raw (idempotence contract).
+	noResult := `[{"type":"system"}]`
+	if got := extractClaudeResult([]byte(noResult)); got != noResult {
+		t.Errorf("no-result array mangled: %q", got)
+	}
+}

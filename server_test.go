@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -15,7 +19,7 @@ import (
 func testGrouping() Grouping {
 	return Grouping{
 		Walkthrough: "Does things.",
-		Cohorts:     []Cohort{{Name: "Core", Summary: "the core", Files: []FileRef{{Path: "a.go"}}}},
+		Cohorts:     []Cohort{{Name: "Core", Summary: "the core", Claim: "does it work?", Type: "claim", Files: []FileRef{{Path: "a.go"}}}},
 	}
 }
 
@@ -24,6 +28,19 @@ func getBody(t *testing.T, srv *httptest.Server, path string) (int, string) {
 	resp, err := srv.Client().Get(srv.URL + path)
 	if err != nil {
 		t.Fatalf("GET %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(body)
+}
+
+// postLoad drives /load the way the page does: a POST form. A GET is refused
+// so a link in the PR description cannot swap the served PR.
+func postLoad(t *testing.T, srv *httptest.Server, pr string) (int, string) {
+	t.Helper()
+	resp, err := srv.Client().PostForm(srv.URL+"/load", url.Values{"pr": {pr}})
+	if err != nil {
+		t.Fatalf("POST /load: %v", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
@@ -94,7 +111,7 @@ func TestLoadSwitchesPR(t *testing.T) {
 	srv := httptest.NewServer(a.mux())
 	defer srv.Close()
 
-	code, body := getBody(t, srv, "/load?pr=https://bitbucket.org/ws/repo/pull-requests/2")
+	code, body := postLoad(t, srv, "https://bitbucket.org/ws/repo/pull-requests/2")
 	// The test client follows the 303 redirect back to /.
 	if code != 200 || !strings.Contains(body, "Second PR") {
 		t.Fatalf("/load: code %d, new title present: %v", code, strings.Contains(body, "Second PR"))
@@ -133,7 +150,7 @@ func TestLoadBadURLKeepsState(t *testing.T) {
 	srv := httptest.NewServer(a.mux())
 	defer srv.Close()
 
-	if code, _ := getBody(t, srv, "/load?pr=https://github.com/x/y/pull/1"); code != 400 {
+	if code, _ := postLoad(t, srv, "https://github.com/x/y/pull/1"); code != 400 {
 		t.Errorf("/load bad url: code %d, want 400", code)
 	}
 	if _, body := getBody(t, srv, "/"); body != "current page" {
@@ -151,7 +168,7 @@ func TestLoadFetchFailureKeepsState(t *testing.T) {
 	srv := httptest.NewServer(a.mux())
 	defer srv.Close()
 
-	code, body := getBody(t, srv, "/load?pr=https://bitbucket.org/ws/repo/pull-requests/9")
+	code, body := postLoad(t, srv, "https://bitbucket.org/ws/repo/pull-requests/9")
 	if code != 404 || !strings.Contains(body, "previous PR is still served") {
 		t.Errorf("/load fetch failure: code %d body %q", code, body)
 	}
@@ -161,7 +178,14 @@ func TestLoadFetchFailureKeepsState(t *testing.T) {
 }
 
 func TestRenderPageDataRoundTrips(t *testing.T) {
-	g := testGrouping()
+	g := Grouping{
+		Walkthrough: "Does things.",
+		Cohorts: []Cohort{
+			{Name: "Core", Summary: "the core", Claim: "does it work?", Type: "claim", Files: []FileRef{{Path: "a.go"}}},
+			{Name: "Dels", Summary: "old suite", Claim: "is the removal complete?", Type: "deletion",
+				Files: []FileRef{{Path: "old/x.go"}, {Path: "old/y.go"}}},
+		},
+	}
 	page, err := renderPage(PullRequest{Title: "T", WebURL: "u"}, g, "side-by-side", 1)
 	if err != nil {
 		t.Fatal(err)
@@ -174,8 +198,14 @@ func TestRenderPageDataRoundTrips(t *testing.T) {
 	if err := json.Unmarshal(m[1], &got); err != nil {
 		t.Fatalf("PAGE is not valid JSON: %v", err)
 	}
-	if got.Title != "T" || got.Format != "side-by-side" || len(got.Cohorts) != 1 || got.Cohorts[0].Files[0].Path != "a.go" {
+	if got.Title != "T" || got.Format != "side-by-side" || len(got.Cohorts) != 2 || got.Cohorts[0].Files[0].Path != "a.go" {
 		t.Errorf("round-trip mismatch: %+v", got)
+	}
+	if got.Cohorts[0].Claim != "does it work?" || got.Cohorts[0].Type != "claim" {
+		t.Errorf("claim/type lost: %+v", got.Cohorts[0])
+	}
+	if got.Cohorts[1].Type != "deletion" {
+		t.Errorf("type lost: %+v", got.Cohorts[1])
 	}
 }
 
@@ -187,6 +217,62 @@ func TestRenderPageEscapesHostileTitle(t *testing.T) {
 	}
 	if strings.Contains(string(page), hostile) {
 		t.Error("hostile title reached the page unescaped")
+	}
+}
+
+func TestLoadWritesRunRecord(t *testing.T) {
+	diff := "diff --git a/new.go b/new.go\n--- a/new.go\n+++ b/new.go\n@@ -1 +1 @@\n-a\n+b\n"
+	bb := fakeBitbucket(t, "T", "- bullet\n", diff)
+	defer bb.Close()
+	mpath := filepath.Join(t.TempDir(), "runs.jsonl")
+	a := &app{
+		client: NewClient("u", "p", bb.URL),
+		group: func(context.Context, string) (string, error) {
+			return `{"walkthrough": "w", "cohorts": [{"name": "N", "summary": "s", "claim": "q?", "type": "claim", "files": ["new.go"]}]}`, nil
+		},
+		budget:  defaultBudget,
+		format:  "line-by-line",
+		metrics: mpath,
+	}
+	if err := a.load(context.Background(), PRRef{Workspace: "ws", Repo: "r", Number: 1}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(mpath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r runRecord
+	if err := json.Unmarshal(bytes.TrimSpace(data), &r); err != nil {
+		t.Fatalf("runs line invalid: %v", err)
+	}
+	if r.PR != "ws/r#1" || r.Files != 1 || r.Anchor == nil || r.Anchor.DescBullets != 1 {
+		t.Errorf("%+v", r)
+	}
+	if r.GroupSecs <= 0 {
+		t.Errorf("group_secs not recorded: %+v", r)
+	}
+}
+
+func TestLoadWritesErrorRecordOnFetchFailure(t *testing.T) {
+	bb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "nope", http.StatusNotFound)
+	}))
+	defer bb.Close()
+	mpath := filepath.Join(t.TempDir(), "runs.jsonl")
+	a := &app{client: NewClient("u", "p", bb.URL), metrics: mpath}
+	if err := a.load(context.Background(), PRRef{Workspace: "ws", Repo: "r", Number: 9}); err == nil {
+		t.Fatal("expected load error")
+	}
+	data, err := os.ReadFile(mpath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r runRecord
+	if err := json.Unmarshal(bytes.TrimSpace(data), &r); err != nil {
+		t.Fatalf("runs line invalid: %v", err)
+	}
+	if r.PR != "ws/r#9" || r.Error == "" {
+		t.Errorf("failed run not recorded: %+v", r)
 	}
 }
 
@@ -228,5 +314,40 @@ func TestPageCarriesVersion(t *testing.T) {
 	}
 	if got.Version != 7 {
 		t.Errorf("version round-trip: got %d, want 7", got.Version)
+	}
+}
+
+// TestLoadRejectsGET pins that /load cannot be triggered by navigation: a link
+// or an <img> in the PR description would otherwise swap the served PR and
+// spend a grouping call.
+func TestLoadRejectsGET(t *testing.T) {
+	a := &app{page: []byte("current page"), diff: "current diff"}
+	srv := httptest.NewServer(a.mux())
+	defer srv.Close()
+	if code, _ := getBody(t, srv, "/load?pr=https://bitbucket.org/ws/repo/pull-requests/1"); code != http.StatusMethodNotAllowed {
+		t.Errorf("GET /load: code %d, want %d", code, http.StatusMethodNotAllowed)
+	}
+	if _, body := getBody(t, srv, "/"); body != "current page" {
+		t.Error("state changed by a GET")
+	}
+}
+
+// TestLocalOnlyRejectsForeignHost pins the DNS-rebinding guard: the diff may be
+// proprietary, and a rebound hostname still reaches a 127.0.0.1 listener.
+func TestLocalOnlyRejectsForeignHost(t *testing.T) {
+	srv := httptest.NewServer(localOnly((&app{page: []byte("p"), diff: "d"}).mux()))
+	defer srv.Close()
+	req, _ := http.NewRequest("GET", srv.URL+"/diff.txt", nil)
+	req.Host = "attacker.example.com"
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("foreign Host: code %d, want %d", resp.StatusCode, http.StatusForbidden)
+	}
+	if code, body := getBody(t, srv, "/diff.txt"); code != 200 || body != "d" {
+		t.Errorf("loopback Host refused: code %d body %q", code, body)
 	}
 }
