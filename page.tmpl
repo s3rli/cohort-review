@@ -262,6 +262,15 @@
 
   /* One cohort per page, so its header is the page heading — the design's
      25px h1 + blurb slot, which previously had nothing to hold. */
+  /* Expand: give the diff the whole window. Sidebar, header and walkthrough
+     go; the toolbar stays, so paging and the view toggles survive — and the
+     cohort picker built for the narrow layout stands in for the hidden
+     sidebar rather than inventing a second navigation. */
+  body.zen .topbar, body.zen .sidebar, body.zen .rsz, body.zen .intro { display: none; }
+  body.zen .coh-pick { display: flex; flex: 0 1 320px; min-width: 0; }
+  body.zen .ico-expand { display: none; }
+  body:not(.zen) .ico-collapse { display: none; }
+
   .cohort { padding: 0 30px 44px; }
   .coh-head { display: flex; align-items: center; gap: 11px; }
   .coh-n { width: 12px; flex: none; font-family: var(--mono); font-size: 13px; color: var(--coh); }
@@ -407,6 +416,12 @@
       <span class="spacer"></span>
       <span class="seg"><button id="m-paged" onclick="go(ACTIVE, 'paged')">paged</button><button id="m-all" onclick="go(ACTIVE, 'all')">all cohorts</button></span>
       <span class="seg"><button id="ll" onclick="setFmt('line-by-line')">line-by-line</button><button id="sbs" onclick="setFmt('side-by-side')">side-by-side</button></span>
+      <button class="icon-btn" id="zen-btn" onclick="toggleZen()" title="expand (esc to exit)" aria-label="expand the diff to the full window">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path class="ico-expand" d="M6 2H2v4M10 14h4v-4M2 10v4h4M14 6V2h-4" stroke="currentColor" stroke-width="1.5"></path>
+          <path class="ico-collapse" d="M6 2v4H2M10 2v4h4M2 10h4v4M14 10h-4v4" stroke="currentColor" stroke-width="1.5"></path>
+        </svg>
+      </button>
     </div>
     <div id="sections"><div class="loading">loading diff…</div></div>
   </main>
@@ -515,6 +530,7 @@
     document.getElementById("walk").textContent = PAGE.walkthrough;
     document.getElementById("intro").hidden = !PAGE.walkthrough;
     setupWalk();
+    setZen(localStorage.getItem("zen") === "1");
     const link = document.getElementById("pr-link");
     link.href = PAGE.url;
     link.hidden = !PAGE.url;
@@ -938,6 +954,20 @@
   function toggleWalk() {
     setWalk(!document.getElementById("walk").classList.contains("clamped"));
   }
+
+  // setZen is only ever a class + a stored flag: the layout follows from CSS,
+  // so nothing here can disagree with what is on screen.
+  function setZen(on) {
+    document.body.classList.toggle("zen", on);
+    const btn = document.getElementById("zen-btn");
+    btn.title = on ? "exit expand (esc)" : "expand (esc to exit)";
+    btn.setAttribute("aria-label", on ? "restore the sidebar and header" : "expand the diff to the full window");
+    localStorage.setItem("zen", on ? "1" : "0");
+  }
+  function toggleZen() { setZen(!document.body.classList.contains("zen")); }
+  addEventListener("keydown", e => {
+    if (e.key === "Escape" && document.body.classList.contains("zen")) setZen(false);
+  });
 
   function toggleTheme() {
     const light = effectiveDark();
