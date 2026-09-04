@@ -209,10 +209,17 @@
   .nav-files li span { direction: ltr; unicode-bidi: bidi-override; }
 
   main { flex: 1; min-width: 0; overflow-y: auto; background: var(--canvas); }
-  .intro { padding: 26px 30px 0; }
-  .intro .label { margin-bottom: 10px; }
+  .intro { padding: 22px 30px 0; }
+  .intro-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+  .walk-toggle { background: none; border: 0; padding: 0; cursor: pointer; color: var(--link);
+    font-family: var(--mono); font-size: 11.5px; }
+  .walk-toggle:hover { color: var(--link-h); }
   .walk { margin: 0; font-size: 14.5px; line-height: 1.55; color: var(--ink-3); max-width: 78ch;
     text-wrap: pretty; }
+  /* The walkthrough describes the whole PR and is read once, but it sits above
+     every file you page to — so it opens clamped and expands on demand. */
+  .walk.clamped { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; }
   .toolbar { display: flex; align-items: center; gap: 10px; padding: 22px 30px 20px; }
   .toolbar .spacer { flex: 1; }
   /* The design's file pager: ‹ | File N of M ▾ | ›. Only paged mode shows one
@@ -382,8 +389,11 @@
   <div class="rsz" id="rsz" title="drag to resize"></div>
   <main id="main">
     <div class="intro" id="intro" hidden>
-      <div class="label">Walkthrough</div>
-      <p class="walk" id="walk"></p>
+      <div class="intro-head">
+        <span class="label">Walkthrough</span>
+        <button class="walk-toggle" id="walk-toggle" onclick="toggleWalk()" hidden>more</button>
+      </div>
+      <p class="walk clamped" id="walk"></p>
     </div>
     <div class="toolbar">
       <label class="coh-pick"><select id="coh-select" onchange="go(+this.value)"></select></label>
@@ -482,6 +492,7 @@
     document.getElementById("pr-title").textContent = PAGE.title;
     document.getElementById("walk").textContent = PAGE.walkthrough;
     document.getElementById("intro").hidden = !PAGE.walkthrough;
+    setupWalk();
     const link = document.getElementById("pr-link");
     link.href = PAGE.url;
     link.hidden = !PAGE.url;
@@ -842,6 +853,27 @@
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
     syncFileNav();
   }
+  // setupWalk restores the last choice, and hides the toggle when the text is
+  // short enough to fit unclamped — no "more" on a two-line walkthrough.
+  function setupWalk() {
+    const w = document.getElementById("walk");
+    const btn = document.getElementById("walk-toggle");
+    w.classList.add("clamped");
+    const overflows = w.scrollHeight > w.clientHeight + 1;
+    btn.hidden = !overflows;
+    if (!overflows) { w.classList.remove("clamped"); return; }
+    if (localStorage.getItem("walkOpen") === "1") setWalk(false);
+    else setWalk(true);
+  }
+  function setWalk(clamped) {
+    document.getElementById("walk").classList.toggle("clamped", clamped);
+    document.getElementById("walk-toggle").textContent = clamped ? "more" : "less";
+    localStorage.setItem("walkOpen", clamped ? "0" : "1");
+  }
+  function toggleWalk() {
+    setWalk(!document.getElementById("walk").classList.contains("clamped"));
+  }
+
   function toggleTheme() {
     const light = effectiveDark();
     document.documentElement.setAttribute("data-theme", light ? "light" : "dark");
