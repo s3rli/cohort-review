@@ -195,7 +195,12 @@
   .nch-chips { display: flex; align-items: center; gap: 8px; padding-left: 22px; }
   .nch-chips .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--coh);
     margin-left: auto; flex: none; }
-  .nav-files { list-style: none; margin: 0 0 6px; padding: 0 0 0 34px; }
+  /* Only the cohort being read lists its files. Every list open at once made
+     the sidebar a flat roll of every file in the PR — the design shows cohort
+     rows alone. Keyed off .nch.on, which syncActive already maintains, so
+     selection and expansion can't disagree. */
+  .nav-files { display: none; list-style: none; margin: 0 0 6px; padding: 0 0 0 34px; }
+  .nch.on + .nav-files { display: block; }
   .nav-files li { font-family: var(--mono); font-size: 11.5px; color: var(--muted); padding: 4px 8px;
     border-radius: 6px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     direction: rtl; text-align: left; }
