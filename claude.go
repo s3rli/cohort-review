@@ -1,6 +1,11 @@
 // Adapted from code-review-agent internal/agent/claude.go — keep parity for
 // same-source convergence. Collapsed to a single grouping call: hardcoded flag
 // set, no telemetry, no tool scopes.
+//
+// DELIBERATE DIVERGENCE: extractClaudeResult also accepts the CLI's stream-event
+// array output. Upstream still assumes the single {"result": …} envelope and is
+// broken against current CLI versions the same way this was — carry this fix
+// across at convergence rather than reverting it.
 package main
 
 import (
