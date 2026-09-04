@@ -430,13 +430,22 @@
     });
   }
 
+  // splitDiffBlocks mirrors Go's SplitUnifiedDiff: split on "diff --git" when
+  // the provider emits those headers, otherwise on the "--- " old-file header.
+  // Both halves of the exactly-once invariant must see the SAME file set — a
+  // JS-only "diff --git" split silently collapses a headerless diff into one
+  // block, so every file after the first renders inside the first file's card.
+  function splitDiffBlocks(raw) {
+    return raw.split(/^diff --git /m.test(raw) ? /(?=^diff --git )/m : /(?=^--- )/m);
+  }
+
   fetch("/diff.txt").then(r => r.text()).then(rawDiff => {
     // Index per-file blocks by the path SplitUnifiedDiff would assign (b/ side,
     // falling back to a/ for deletions) so cohort file lists match exactly.
     // A path seen in two segments is appended and marked unsplittable — its
     // concatenated block can't be hunk-indexed, matching the server's
     // bare-only rule for duplicate paths.
-    rawDiff.split(/(?=^diff --git )/m).forEach(b => {
+    splitDiffBlocks(rawDiff).forEach(b => {
       const m = b.match(/^\+\+\+ b\/(.+)$/m) || b.match(/^--- a\/(.+)$/m);
       if (!m) return;
       const fb = fileBlocks[m[1]];

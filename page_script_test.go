@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -32,6 +34,61 @@ func TestPageScriptParses(t *testing.T) {
 		}
 		if out, err := exec.Command(node, "--check", js).CombinedOutput(); err != nil {
 			t.Fatalf("inline script %d does not parse: %v\n%s", i, err, out)
+		}
+	}
+}
+
+// TestSplitDiffBlocksMatchesGo runs the page's own splitDiffBlocks in node over
+// both diff styles and checks it indexes exactly the paths SplitUnifiedDiff
+// does. The two are the server and client halves of the same exactly-once
+// invariant; a JS-only "diff --git" split silently collapses a headerless diff
+// into one block. Skipped when node is absent.
+func TestSplitDiffBlocksMatchesGo(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not in PATH")
+	}
+	page, err := renderPage(PullRequest{Title: "T"}, testGrouping(), "line-by-line")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn := regexp.MustCompile(`(?s)function splitDiffBlocks\(raw\) \{.*?\n  \}`).Find(page)
+	if fn == nil {
+		t.Fatal("splitDiffBlocks not found in the rendered page")
+	}
+	diffs := map[string]string{
+		"git headers": "diff --git a/one.go b/one.go\n--- a/one.go\n+++ b/one.go\n@@ -1 +1 @@\n-a\n+b\n" +
+			"diff --git a/two.go b/two.go\n--- a/two.go\n+++ b/two.go\n@@ -1 +1 @@\n-c\n+d\n",
+		"no git headers": "--- a/one.go\n+++ b/one.go\n@@ -1 +1 @@\n-a\n+b\n" +
+			"--- a/two.go\n+++ b/two.go\n@@ -1 +1 @@\n-c\n+d\n",
+	}
+	for name, diff := range diffs {
+		var want []string
+		for _, s := range SplitUnifiedDiff(diff) {
+			if s.Path != "" {
+				want = append(want, s.Path)
+			}
+		}
+		// Index exactly as the page does, then print the paths it found.
+		harness := string(fn) + `
+const raw = ` + strconv.Quote(diff) + `;
+const paths = [];
+splitDiffBlocks(raw).forEach(b => {
+  const m = b.match(/^\+\+\+ b\/(.+)$/m) || b.match(/^--- a\/(.+)$/m);
+  if (m) paths.push(m[1]);
+});
+console.log(paths.join(","));
+`
+		js := filepath.Join(t.TempDir(), "h.js")
+		if err := os.WriteFile(js, []byte(harness), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		out, err := exec.Command(node, js).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s: node failed: %v\n%s", name, err, out)
+		}
+		if got := strings.TrimSpace(string(out)); got != strings.Join(want, ",") {
+			t.Errorf("%s: page indexed %q, Go indexed %q", name, got, strings.Join(want, ","))
 		}
 	}
 }
