@@ -292,14 +292,18 @@ func buildCohortPrompt(in promptInput, nonce string) string {
 	b.WriteString("\n\n## Diff content\n")
 	b.WriteString(Fence(nonce, "diff", in.Hunks))
 	b.WriteString("\n")
+	// These lists are developer-controlled FILE PATHS, so they are fenced like
+	// every other untrusted string. Interpolating them into the note sentence
+	// put attacker-chosen prose outside the fence, in the zone the rules above
+	// tell the model to trust — a filename is free text.
 	if len(in.Omitted) > 0 {
-		b.WriteString("\nNOTE: hunks for the following files were omitted to fit a size budget. They are still in the changed-files list and MUST still be grouped — classify them by path and by relation to the files whose hunks you can see: ")
-		b.WriteString(strings.Join(in.Omitted, ", "))
+		b.WriteString("\nNOTE: hunks for the files listed in the fenced block below were omitted to fit a size budget. They are still in the changed-files list and MUST still be grouped — classify them by path and by relation to the files whose hunks you can see.\n")
+		b.WriteString(Fence(nonce, "omitted files", strings.Join(in.Omitted, "\n")))
 		b.WriteString("\n")
 	}
 	if len(in.Truncated) > 0 {
-		b.WriteString("\nNOTE: hunks for the following files were TRUNCATED to fit a size budget — only each file's leading hunks are shown. Group them normally, but do not assume you have seen their whole change: ")
-		b.WriteString(strings.Join(in.Truncated, ", "))
+		b.WriteString("\nNOTE: hunks for the files listed in the fenced block below were TRUNCATED to fit a size budget — only each file's leading hunks are shown. Group them normally, but do not assume you have seen their whole change.\n")
+		b.WriteString(Fence(nonce, "truncated files", strings.Join(in.Truncated, "\n")))
 		b.WriteString("\n")
 	}
 	return b.String()
@@ -460,7 +464,9 @@ func repairGrouping(g modelGrouping, idx diffIndex) Grouping {
 		for _, f := range mc.Files {
 			p, n, ok := resolveRef(f, idx, valid)
 			if !ok {
-				fmt.Fprintf(os.Stderr, "cohort-review: dropped unresolvable file ref: %s\n", f)
+				// Quoted: the ref is model output derived from PR content and can
+				// carry terminal escape sequences.
+				fmt.Fprintf(os.Stderr, "cohort-review: dropped unresolvable file ref: %s\n", strconv.QuoteToASCII(f))
 				continue
 			}
 			m := idx.hunks[p]

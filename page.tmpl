@@ -383,7 +383,7 @@
   </div>
   <div class="tb-actions">
     <a class="btn" id="pr-link" target="_blank" rel="noopener" hidden>view on Bitbucket ↗</a>
-    <form class="loadf" action="/load"
+    <form class="loadf" method="post" action="/load"
       onsubmit="const b=this.querySelector('button'); b.disabled=true; b.textContent='grouping…';">
       <input name="pr" required placeholder="switch PR: paste bitbucket URL">
       <button class="btn">load</button>

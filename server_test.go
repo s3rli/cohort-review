@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -27,6 +28,19 @@ func getBody(t *testing.T, srv *httptest.Server, path string) (int, string) {
 	resp, err := srv.Client().Get(srv.URL + path)
 	if err != nil {
 		t.Fatalf("GET %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(body)
+}
+
+// postLoad drives /load the way the page does: a POST form. A GET is refused
+// so a link in the PR description cannot swap the served PR.
+func postLoad(t *testing.T, srv *httptest.Server, pr string) (int, string) {
+	t.Helper()
+	resp, err := srv.Client().PostForm(srv.URL+"/load", url.Values{"pr": {pr}})
+	if err != nil {
+		t.Fatalf("POST /load: %v", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
@@ -97,7 +111,7 @@ func TestLoadSwitchesPR(t *testing.T) {
 	srv := httptest.NewServer(a.mux())
 	defer srv.Close()
 
-	code, body := getBody(t, srv, "/load?pr=https://bitbucket.org/ws/repo/pull-requests/2")
+	code, body := postLoad(t, srv, "https://bitbucket.org/ws/repo/pull-requests/2")
 	// The test client follows the 303 redirect back to /.
 	if code != 200 || !strings.Contains(body, "Second PR") {
 		t.Fatalf("/load: code %d, new title present: %v", code, strings.Contains(body, "Second PR"))
@@ -136,7 +150,7 @@ func TestLoadBadURLKeepsState(t *testing.T) {
 	srv := httptest.NewServer(a.mux())
 	defer srv.Close()
 
-	if code, _ := getBody(t, srv, "/load?pr=https://github.com/x/y/pull/1"); code != 400 {
+	if code, _ := postLoad(t, srv, "https://github.com/x/y/pull/1"); code != 400 {
 		t.Errorf("/load bad url: code %d, want 400", code)
 	}
 	if _, body := getBody(t, srv, "/"); body != "current page" {
@@ -154,7 +168,7 @@ func TestLoadFetchFailureKeepsState(t *testing.T) {
 	srv := httptest.NewServer(a.mux())
 	defer srv.Close()
 
-	code, body := getBody(t, srv, "/load?pr=https://bitbucket.org/ws/repo/pull-requests/9")
+	code, body := postLoad(t, srv, "https://bitbucket.org/ws/repo/pull-requests/9")
 	if code != 404 || !strings.Contains(body, "previous PR is still served") {
 		t.Errorf("/load fetch failure: code %d body %q", code, body)
 	}
@@ -300,5 +314,40 @@ func TestPageCarriesVersion(t *testing.T) {
 	}
 	if got.Version != 7 {
 		t.Errorf("version round-trip: got %d, want 7", got.Version)
+	}
+}
+
+// TestLoadRejectsGET pins that /load cannot be triggered by navigation: a link
+// or an <img> in the PR description would otherwise swap the served PR and
+// spend a grouping call.
+func TestLoadRejectsGET(t *testing.T) {
+	a := &app{page: []byte("current page"), diff: "current diff"}
+	srv := httptest.NewServer(a.mux())
+	defer srv.Close()
+	if code, _ := getBody(t, srv, "/load?pr=https://bitbucket.org/ws/repo/pull-requests/1"); code != http.StatusMethodNotAllowed {
+		t.Errorf("GET /load: code %d, want %d", code, http.StatusMethodNotAllowed)
+	}
+	if _, body := getBody(t, srv, "/"); body != "current page" {
+		t.Error("state changed by a GET")
+	}
+}
+
+// TestLocalOnlyRejectsForeignHost pins the DNS-rebinding guard: the diff may be
+// proprietary, and a rebound hostname still reaches a 127.0.0.1 listener.
+func TestLocalOnlyRejectsForeignHost(t *testing.T) {
+	srv := httptest.NewServer(localOnly((&app{page: []byte("p"), diff: "d"}).mux()))
+	defer srv.Close()
+	req, _ := http.NewRequest("GET", srv.URL+"/diff.txt", nil)
+	req.Host = "attacker.example.com"
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("foreign Host: code %d, want %d", resp.StatusCode, http.StatusForbidden)
+	}
+	if code, body := getBody(t, srv, "/diff.txt"); code != 200 || body != "d" {
+		t.Errorf("loopback Host refused: code %d body %q", code, body)
 	}
 }

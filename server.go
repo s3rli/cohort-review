@@ -142,6 +142,24 @@ func renderPage(pr PullRequest, g Grouping, format string, version int) ([]byte,
 // being inlined in the HTML: a diff can contain a literal </script>, which
 // would terminate any inline block; a plain-text response has no escaping
 // surface at all.
+// localOnly rejects requests whose Host is not a loopback literal. The server
+// binds 127.0.0.1, but a browser will still send a rebound attacker hostname
+// there — and the diff it would then read may be proprietary. Checking Host
+// costs nothing and closes DNS rebinding.
+func localOnly(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.Host)
+		if err != nil {
+			host = r.Host
+		}
+		if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+			http.Error(w, "cohort-review serves 127.0.0.1 only", http.StatusForbidden)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
 func (a *app) mux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -178,7 +196,18 @@ func (a *app) mux() *http.ServeMux {
 // Synchronous — the browser waits out the grouping call, then is redirected
 // back to /. On any failure the currently served PR is left as-is.
 func (a *app) handleLoad(w http.ResponseWriter, r *http.Request) {
-	ref, err := parsePRRef(r.URL.Query().Get("pr"))
+	// POST only: a GET here is reachable from any page the reviewer opens
+	// (a link or an <img> in the PR description itself) and swaps the served
+	// PR out from under them.
+	if r.Method != http.MethodPost {
+		http.Error(w, "use POST", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	ref, err := parsePRRef(r.FormValue("pr"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -221,7 +250,7 @@ func serve(a *app, port int, openBrowser bool) int {
 			fmt.Fprintf(os.Stderr, "cohort-review: could not open browser: %v\n", err)
 		}
 	}
-	if err := http.Serve(ln, a.mux()); err != nil {
+	if err := http.Serve(ln, localOnly(a.mux())); err != nil {
 		fmt.Fprintf(os.Stderr, "cohort-review: serve: %v\n", err)
 		return 1
 	}

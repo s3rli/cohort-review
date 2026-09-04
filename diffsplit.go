@@ -8,6 +8,7 @@ package main
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -157,11 +158,30 @@ func recoverSegmentPaths(segs []FileSegment) []FileSegment {
 }
 
 // gitHeaderPath reads the new-side path out of a leading "diff --git" line.
-// Git C-quotes paths containing unusual bytes; those are left to the caller as
-// "" rather than mis-parsed, preserving today's behavior for them.
+// Git C-quotes paths holding unusual bytes ("diff --git \"a/ú.go\" \"b/ú.go\"",
+// the default for non-ASCII under core.quotePath), and the ---/+++ headers are
+// quoted with it — so without decoding here such a file has no path anywhere
+// and vanishes from the changed-files list, the prompt and the page while the
+// rest of the diff renders normally.
 func gitHeaderPath(raw string) string {
 	line, _, _ := strings.Cut(raw, "\n")
-	rest, ok := strings.CutPrefix(line, "diff --git a/")
+	rest, ok := strings.CutPrefix(line, "diff --git ")
+	if !ok {
+		return ""
+	}
+	if strings.HasPrefix(rest, "\"") {
+		// Quoted form: the two paths are separate C-quoted tokens.
+		i := strings.Index(rest, "\" \"")
+		if i < 0 {
+			return ""
+		}
+		b, err := strconv.Unquote(rest[i+len("\" "):])
+		if err != nil {
+			return ""
+		}
+		return strings.TrimPrefix(b, "b/")
+	}
+	rest, ok = strings.CutPrefix(rest, "a/")
 	if !ok {
 		return ""
 	}
@@ -169,9 +189,5 @@ func gitHeaderPath(raw string) string {
 	if i < 0 {
 		return ""
 	}
-	p := rest[i+len(" b/"):]
-	if strings.HasPrefix(p, "\"") || p == "" {
-		return ""
-	}
-	return p
+	return rest[i+len(" b/"):]
 }

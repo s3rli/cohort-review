@@ -1,0 +1,590 @@
+- generic [active] [ref=f1e1]:
+  - banner [ref=f1e2]:
+    - generic [ref=f1e3]: Local
+    - generic [ref=f1e8]:
+      - heading "[Platform][PLAT-2336] Support array" [level=1] [ref=f1e9]
+      - generic [ref=f1e10]:
+        - generic [ref=f1e11]: cohort review
+        - generic [ref=f1e13]: ·
+        - generic [ref=f1e14]: 1 cohorts
+        - generic [ref=f1e15]: ·
+        - generic [ref=f1e16]: 15 files
+        - generic [ref=f1e17]: ·
+        - generic [ref=f1e18]: +2859 −323
+    - generic [ref=f1e19]:
+      - link "view on Bitbucket ↗" [ref=f1e20] [cursor=pointer]:
+        - /url: https://bitbucket.org/starlinglabs/dbfle-bson-go/pull-requests/14
+      - generic [ref=f1e21]:
+        - 'textbox "switch PR: paste bitbucket URL" [ref=f1e22]'
+        - button "load" [ref=f1e23] [cursor=pointer]
+      - button "toggle theme" [ref=f1e24] [cursor=pointer]
+  - generic [ref=f1e28]:
+    - complementary [ref=f1e29]:
+      - generic [ref=f1e30]:
+        - generic [ref=f1e31]: Cohorts
+        - generic [ref=f1e32]: "1"
+      - navigation [ref=f1e34]:
+        - generic [ref=f1e35]:
+          - generic [ref=f1e36] [cursor=pointer]:
+            - generic [ref=f1e37]:
+              - generic [ref=f1e38]: "1"
+              - generic [ref=f1e39]: All changes
+            - generic [ref=f1e40]:
+              - generic [ref=f1e41]: 15 files
+              - generic [ref=f1e42]: +2859 −323
+          - list [ref=f1e44]:
+            - listitem "example/main.go" [ref=f1e45] [cursor=pointer]
+            - listitem "flebson/client.go" [ref=f1e46] [cursor=pointer]
+            - listitem "flebson/client_test.go" [ref=f1e47] [cursor=pointer]
+            - listitem "flebson/decoder.go" [ref=f1e48] [cursor=pointer]
+            - listitem "flebson/decoder_test.go" [ref=f1e49] [cursor=pointer]
+            - listitem "flebson/encoder.go" [ref=f1e50] [cursor=pointer]
+            - listitem "flebson/encoder_test.go" [ref=f1e51] [cursor=pointer]
+            - listitem "flebson/query.go" [ref=f1e52] [cursor=pointer]
+            - listitem "flebson/reflect.go" [ref=f1e53] [cursor=pointer]
+            - listitem "flebson/span_test.go" [ref=f1e54] [cursor=pointer]
+            - listitem "flebson/tag.go" [ref=f1e55] [cursor=pointer]
+            - listitem "flebson/types.go" [ref=f1e56] [cursor=pointer]
+            - listitem "integration-test/array_shapes_test.go" [ref=f1e57] [cursor=pointer]
+            - listitem "integration-test/helpers_test.go" [ref=f1e58] [cursor=pointer]
+            - listitem "integration-test/struct_shapes_test.go" [ref=f1e59] [cursor=pointer]
+      - generic [ref=f1e60]:
+        - generic [ref=f1e61]: Rendered by
+        - generic [ref=f1e62]: diff2html · localhost only
+    - generic "drag to resize" [ref=f1e63]
+    - main [ref=f1e64]:
+      - generic [ref=f1e65]:
+        - generic [ref=f1e66]:
+          - button "previous file" [disabled] [ref=f1e67]: ‹
+          - generic [ref=f1e68]:
+            - generic [ref=f1e69]: File 1 of 15
+            - generic [ref=f1e70]: ▾
+            - combobox "choose file in this cohort" [ref=f1e71] [cursor=pointer]:
+              - option "1. example/main.go" [selected]
+              - option "2. flebson/client.go"
+              - option "3. flebson/client_test.go"
+              - option "4. flebson/decoder.go"
+              - option "5. flebson/decoder_test.go"
+              - option "6. flebson/encoder.go"
+              - option "7. flebson/encoder_test.go"
+              - option "8. flebson/query.go"
+              - option "9. flebson/reflect.go"
+              - option "10. flebson/span_test.go"
+              - option "11. flebson/tag.go"
+              - option "12. flebson/types.go"
+              - option "13. integration-test/array_shapes_test.go"
+              - option "14. integration-test/helpers_test.go"
+              - option "15. integration-test/struct_shapes_test.go"
+          - button "next file" [ref=f1e72] [cursor=pointer]: ›
+        - generic [ref=f1e73]: example/main.go
+        - generic [ref=f1e74]:
+          - button "paged" [ref=f1e75] [cursor=pointer]
+          - button "all cohorts" [ref=f1e76] [cursor=pointer]
+        - generic [ref=f1e77]:
+          - button "line-by-line" [ref=f1e78] [cursor=pointer]
+          - button "side-by-side" [ref=f1e79] [cursor=pointer]
+        - button "expand the diff to the full window" [ref=f1e80] [cursor=pointer]
+      - generic [ref=f1e84]:
+        - generic [ref=f1e85]:
+          - generic [ref=f1e86]: "1"
+          - heading "All changes" [level=2] [ref=f1e87]
+          - generic [ref=f1e88]:
+            - generic [ref=f1e89]: "+2859"
+            - generic [ref=f1e90]: −323
+            - generic [ref=f1e91]: 15 files
+        - paragraph [ref=f1e92]: Automatic grouping unavailable — showing all files.
+        - generic [ref=f1e96]:
+          - generic [ref=f1e97]:
+            - generic [ref=f1e98]:
+              - generic [ref=f1e101]: example/main.go
+              - generic [ref=f1e102]: CHANGED
+            - generic [ref=f1e103] [cursor=pointer]:
+              - checkbox "Viewed" [ref=f1e104]
+              - text: Viewed
+          - table [ref=f1e107]:
+            - rowgroup [ref=f1e108]:
+              - row [ref=f1e109]:
+                - cell [ref=f1e110] [cursor=pointer]
+                - 'cell "@@ -30,6 +30,16 @@ type InnerProfile struct {" [ref=f1e111]'
+              - row [ref=f1e113]:
+                - cell "30 30" [ref=f1e114] [cursor=pointer]:
+                  - generic [ref=f1e115]: "30"
+                  - generic [ref=f1e116]: "30"
+                - 'cell "LastNameBindex string `bson:\"last_name_bindex\"`" [ref=f1e117]'
+              - row [ref=f1e120]:
+                - cell "31 31" [ref=f1e121] [cursor=pointer]:
+                  - generic [ref=f1e122]: "31"
+                  - generic [ref=f1e123]: "31"
+                - 'cell "}" [ref=f1e124]'
+              - row [ref=f1e127]:
+                - cell "32 32" [ref=f1e128] [cursor=pointer]:
+                  - generic [ref=f1e129]: "32"
+                  - generic [ref=f1e130]: "32"
+                - cell [ref=f1e131]
+              - row [ref=f1e134]:
+                - cell "33" [ref=f1e135] [cursor=pointer]
+                - cell "+ // Score is an element of User.Scores; its fle-tagged fields are encrypted per" [ref=f1e137]:
+                  - generic [ref=f1e138]:
+                    - text: +
+                    - generic [ref=f1e139]: // Score is an element of User.Scores; its fle-tagged fields are encrypted per
+              - row [ref=f1e140]:
+                - cell "34" [ref=f1e141] [cursor=pointer]
+                - cell "+ // element, with the companions living inside the element." [ref=f1e143]:
+                  - generic [ref=f1e144]:
+                    - text: +
+                    - generic [ref=f1e145]: // element, with the companions living inside the element.
+              - row [ref=f1e146]:
+                - cell "35" [ref=f1e147] [cursor=pointer]
+                - 'cell "+ type Score struct {" [ref=f1e149]':
+                  - generic [ref=f1e150]:
+                    - text: +
+                    - generic [ref=f1e151]: "type Score struct {"
+              - row [ref=f1e152]:
+                - cell "36" [ref=f1e153] [cursor=pointer]
+                - 'cell "+ Value int `bson:\"value\" fle:\"value;queryable\"`" [ref=f1e155]':
+                  - generic [ref=f1e156]:
+                    - text: +
+                    - generic [ref=f1e157]: "Value int `bson:\"value\" fle:\"value;queryable\"`"
+              - row [ref=f1e158]:
+                - cell "37" [ref=f1e159] [cursor=pointer]
+                - 'cell "+ ValueCipher string `bson:\"value_cipher\"`" [ref=f1e161]':
+                  - generic [ref=f1e162]:
+                    - text: +
+                    - generic [ref=f1e163]: "ValueCipher string `bson:\"value_cipher\"`"
+              - row [ref=f1e164]:
+                - cell "38" [ref=f1e165] [cursor=pointer]
+                - 'cell "+ ValueBindex string `bson:\"value_bindex\"`" [ref=f1e167]':
+                  - generic [ref=f1e168]:
+                    - text: +
+                    - generic [ref=f1e169]: "ValueBindex string `bson:\"value_bindex\"`"
+              - row [ref=f1e170]:
+                - cell "39" [ref=f1e171] [cursor=pointer]
+                - 'cell "+ Comment string `bson:\"comment\" fle:\"comment;queryable=false\"`" [ref=f1e173]':
+                  - generic [ref=f1e174]:
+                    - text: +
+                    - generic [ref=f1e175]: "Comment string `bson:\"comment\" fle:\"comment;queryable=false\"`"
+              - row [ref=f1e176]:
+                - cell "40" [ref=f1e177] [cursor=pointer]
+                - 'cell "+ CommentCipher string `bson:\"comment_cipher\"`" [ref=f1e179]':
+                  - generic [ref=f1e180]:
+                    - text: +
+                    - generic [ref=f1e181]: "CommentCipher string `bson:\"comment_cipher\"`"
+              - row [ref=f1e182]:
+                - cell "41" [ref=f1e183] [cursor=pointer]
+                - 'cell "+ }" [ref=f1e185]':
+                  - generic [ref=f1e186]:
+                    - text: +
+                    - generic [ref=f1e187]: "}"
+              - row [ref=f1e188]:
+                - cell "42" [ref=f1e189] [cursor=pointer]
+                - cell "+" [ref=f1e191]
+              - row [ref=f1e194]:
+                - cell "33 43" [ref=f1e195] [cursor=pointer]:
+                  - generic [ref=f1e196]: "33"
+                  - generic [ref=f1e197]: "43"
+                - cell "// User demonstrates a struct with field-level encryption." [ref=f1e198]
+              - row [ref=f1e201]:
+                - cell "34 44" [ref=f1e202] [cursor=pointer]:
+                  - generic [ref=f1e203]: "34"
+                  - generic [ref=f1e204]: "44"
+                - cell "// Fields tagged with fle:\"...\" are encrypted by flebson.Client." [ref=f1e205]
+              - row [ref=f1e208]:
+                - cell "35 45" [ref=f1e209] [cursor=pointer]:
+                  - generic [ref=f1e210]: "35"
+                  - generic [ref=f1e211]: "45"
+                - cell "// Each encrypted field requires a companion string field with a \"_cipher\" suffix," [ref=f1e212]
+              - row [ref=f1e215]:
+                - cell [ref=f1e216] [cursor=pointer]
+                - 'cell "@@ -52,6 +62,17 @@ type User struct {" [ref=f1e217]'
+              - row [ref=f1e219]:
+                - cell "52 62" [ref=f1e220] [cursor=pointer]:
+                  - generic [ref=f1e221]: "52"
+                  - generic [ref=f1e222]: "62"
+                - 'cell "Nickname string `bson:\"nickname,omitempty\" fle:\"nickname;queryable\"`" [ref=f1e223]'
+              - row [ref=f1e226]:
+                - cell "53 63" [ref=f1e227] [cursor=pointer]:
+                  - generic [ref=f1e228]: "53"
+                  - generic [ref=f1e229]: "63"
+                - 'cell "NicknameCipher string `bson:\"nickname_cipher,omitempty\"`" [ref=f1e230]'
+              - row [ref=f1e233]:
+                - cell "54 64" [ref=f1e234] [cursor=pointer]:
+                  - generic [ref=f1e235]: "54"
+                  - generic [ref=f1e236]: "64"
+                - 'cell "NicknameBindex string `bson:\"nickname_bindex,omitempty\"`" [ref=f1e237]'
+              - row [ref=f1e240]:
+                - cell "65" [ref=f1e241] [cursor=pointer]
+                - 'cell "+ // Whole-array field: one cipher for the BSON array, one blind index per" [ref=f1e243]':
+                  - generic [ref=f1e244]:
+                    - text: +
+                    - generic [ref=f1e245]: "// Whole-array field: one cipher for the BSON array, one blind index per"
+              - row [ref=f1e246]:
+                - cell "66" [ref=f1e247] [cursor=pointer]
+                - cell "+ // element (nil for nil elements) in a []*string companion." [ref=f1e249]:
+                  - generic [ref=f1e250]:
+                    - text: +
+                    - generic [ref=f1e251]: // element (nil for nil elements) in a []*string companion.
+              - row [ref=f1e252]:
+                - cell "67" [ref=f1e253] [cursor=pointer]
+                - 'cell "+ Phones []*string `bson:\"phones\" fle:\"phones\"`" [ref=f1e255]':
+                  - generic [ref=f1e256]:
+                    - text: +
+                    - generic [ref=f1e257]: "Phones []*string `bson:\"phones\" fle:\"phones\"`"
+              - row [ref=f1e258]:
+                - cell "68" [ref=f1e259] [cursor=pointer]
+                - 'cell "+ PhonesCipher string `bson:\"phones_cipher\"`" [ref=f1e261]':
+                  - generic [ref=f1e262]:
+                    - text: +
+                    - generic [ref=f1e263]: "PhonesCipher string `bson:\"phones_cipher\"`"
+              - row [ref=f1e264]:
+                - cell "69" [ref=f1e265] [cursor=pointer]
+                - 'cell "+ PhonesBindex []*string `bson:\"phones_bindex\"`" [ref=f1e267]':
+                  - generic [ref=f1e268]:
+                    - text: +
+                    - generic [ref=f1e269]: "PhonesBindex []*string `bson:\"phones_bindex\"`"
+              - row [ref=f1e270]:
+                - cell "70" [ref=f1e271] [cursor=pointer]
+                - 'cell "+ // Slice of structs: each element carries its own companions." [ref=f1e273]':
+                  - generic [ref=f1e274]:
+                    - text: +
+                    - generic [ref=f1e275]: "// Slice of structs: each element carries its own companions."
+              - row [ref=f1e276]:
+                - cell "71" [ref=f1e277] [cursor=pointer]
+                - 'cell "+ Scores []Score `bson:\"scores\"`" [ref=f1e279]':
+                  - generic [ref=f1e280]:
+                    - text: +
+                    - generic [ref=f1e281]: "Scores []Score `bson:\"scores\"`"
+              - row [ref=f1e282]:
+                - cell "72" [ref=f1e283] [cursor=pointer]
+                - cell "+ // Slice of maps with per-element paths (the Ruby extension's \"array nested" [ref=f1e285]:
+                  - generic [ref=f1e286]:
+                    - text: +
+                    - generic [ref=f1e287]: // Slice of maps with per-element paths (the Ruby extension's "array nested
+              - row [ref=f1e288]:
+                - cell "73" [ref=f1e289] [cursor=pointer]
+                - cell "+ // mode\"). When decoding such documents from MongoDB into []any, configure" [ref=f1e291]:
+                  - generic [ref=f1e292]:
+                    - text: +
+                    - generic [ref=f1e293]: // mode"). When decoding such documents from MongoDB into []any, configure
+              - row [ref=f1e294]:
+                - cell "74" [ref=f1e295] [cursor=pointer]
+                - cell "+ // the decoder with DefaultDocumentM so elements are bson.M, not bson.D." [ref=f1e297]:
+                  - generic [ref=f1e298]:
+                    - text: +
+                    - generic [ref=f1e299]: // the decoder with DefaultDocumentM so elements are bson.M, not bson.D.
+              - row [ref=f1e300]:
+                - cell "75" [ref=f1e301] [cursor=pointer]
+                - 'cell "+ Items []map[string]any `bson:\"items\" fle:\"items.sku;queryable;type=string,items.note;queryable=false;type=string\"`" [ref=f1e303]':
+                  - generic [ref=f1e304]:
+                    - text: +
+                    - generic [ref=f1e305]: "Items []map[string]any `bson:\"items\" fle:\"items.sku;queryable;type=string,items.note;queryable=false;type=string\"`"
+              - row [ref=f1e306]:
+                - cell "55 76" [ref=f1e307] [cursor=pointer]:
+                  - generic [ref=f1e308]: "55"
+                  - generic [ref=f1e309]: "76"
+                - 'cell "}" [ref=f1e310]'
+              - row [ref=f1e313]:
+                - cell "56 77" [ref=f1e314] [cursor=pointer]:
+                  - generic [ref=f1e315]: "56"
+                  - generic [ref=f1e316]: "77"
+                - cell [ref=f1e317]
+              - row [ref=f1e320]:
+                - cell "57 78" [ref=f1e321] [cursor=pointer]:
+                  - generic [ref=f1e322]: "57"
+                  - generic [ref=f1e323]: "78"
+                - cell "// Domain satisfies the flebson.Encryptable interface." [ref=f1e324]
+              - row [ref=f1e327]:
+                - cell [ref=f1e328] [cursor=pointer]
+                - 'cell "@@ -212,6 +233,7 @@ func main() {" [ref=f1e329]'
+              - row [ref=f1e331]:
+                - cell "212 233" [ref=f1e332] [cursor=pointer]:
+                  - generic [ref=f1e333]: "212"
+                  - generic [ref=f1e334]: "233"
+                - cell "client := flebson.NewClient(ec, flebson.WithPhaseResolver(resolver))" [ref=f1e335]
+              - row [ref=f1e338]:
+                - cell "213 234" [ref=f1e339] [cursor=pointer]:
+                  - generic [ref=f1e340]: "213"
+                  - generic [ref=f1e341]: "234"
+                - cell [ref=f1e342]
+              - row [ref=f1e345]:
+                - cell "214 235" [ref=f1e346] [cursor=pointer]:
+                  - generic [ref=f1e347]: "214"
+                  - generic [ref=f1e348]: "235"
+                - cell "// Prepare a sample document." [ref=f1e349]
+              - row [ref=f1e352]:
+                - cell "236" [ref=f1e353] [cursor=pointer]
+                - cell "+ phone1, phone2 := \"+1111111111\", \"+2222222222\"" [ref=f1e355]:
+                  - generic [ref=f1e356]:
+                    - text: +
+                    - generic [ref=f1e357]: phone1, phone2 := "+1111111111", "+2222222222"
+              - row [ref=f1e358]:
+                - cell "215 237" [ref=f1e359] [cursor=pointer]:
+                  - generic [ref=f1e360]: "215"
+                  - generic [ref=f1e361]: "237"
+                - 'cell "user := User{" [ref=f1e362]'
+              - row [ref=f1e365]:
+                - cell "216 238" [ref=f1e366] [cursor=pointer]:
+                  - generic [ref=f1e367]: "216"
+                  - generic [ref=f1e368]: "238"
+                - 'cell "InnerProfile: InnerProfile{" [ref=f1e369]'
+              - row [ref=f1e372]:
+                - cell "217 239" [ref=f1e373] [cursor=pointer]:
+                  - generic [ref=f1e374]: "217"
+                  - generic [ref=f1e375]: "239"
+                - 'cell "FirstName: \"Alice\"," [ref=f1e376]'
+              - row [ref=f1e379]:
+                - cell [ref=f1e380] [cursor=pointer]
+                - 'cell "@@ -236,6 +258,9 @@ func main() {" [ref=f1e381]'
+              - row [ref=f1e383]:
+                - cell "236 258" [ref=f1e384] [cursor=pointer]:
+                  - generic [ref=f1e385]: "236"
+                  - generic [ref=f1e386]: "258"
+                - 'cell "\"country\": \"Country\"," [ref=f1e387]'
+              - row [ref=f1e390]:
+                - cell "237 259" [ref=f1e391] [cursor=pointer]:
+                  - generic [ref=f1e392]: "237"
+                  - generic [ref=f1e393]: "259"
+                - 'cell "\"city\": \"City\"," [ref=f1e394]'
+              - row [ref=f1e397]:
+                - cell "238 260" [ref=f1e398] [cursor=pointer]:
+                  - generic [ref=f1e399]: "238"
+                  - generic [ref=f1e400]: "260"
+                - 'cell "}," [ref=f1e401]'
+              - row [ref=f1e404]:
+                - cell "261" [ref=f1e405] [cursor=pointer]
+                - 'cell "+ Phones: []*string{&phone1, nil, &phone2}," [ref=f1e407]':
+                  - generic [ref=f1e408]:
+                    - text: +
+                    - generic [ref=f1e409]: "Phones: []*string{&phone1, nil, &phone2},"
+              - row [ref=f1e410]:
+                - cell "262" [ref=f1e411] [cursor=pointer]
+                - 'cell "+ Scores: []Score{{Value: 95, Comment: \"excellent\"}, {Value: 80}}," [ref=f1e413]':
+                  - generic [ref=f1e414]:
+                    - text: +
+                    - generic [ref=f1e415]: "Scores: []Score{{Value: 95, Comment: \"excellent\"}, {Value: 80}},"
+              - row [ref=f1e416]:
+                - cell "263" [ref=f1e417] [cursor=pointer]
+                - 'cell "+ Items: []map[string]any{{\"sku\": \"A1\", \"note\": \"first\"}, {\"sku\": \"B2\"}}," [ref=f1e419]':
+                  - generic [ref=f1e420]:
+                    - text: +
+                    - generic [ref=f1e421]: "Items: []map[string]any{{\"sku\": \"A1\", \"note\": \"first\"}, {\"sku\": \"B2\"}},"
+              - row [ref=f1e422]:
+                - cell "239 264" [ref=f1e423] [cursor=pointer]:
+                  - generic [ref=f1e424]: "239"
+                  - generic [ref=f1e425]: "264"
+                - 'cell "}" [ref=f1e426]'
+              - row [ref=f1e429]:
+                - cell "240 265" [ref=f1e430] [cursor=pointer]:
+                  - generic [ref=f1e431]: "240"
+                  - generic [ref=f1e432]: "265"
+                - cell [ref=f1e433]
+              - row [ref=f1e436]:
+                - cell "241 266" [ref=f1e437] [cursor=pointer]:
+                  - generic [ref=f1e438]: "241"
+                  - generic [ref=f1e439]: "266"
+                - cell "// Show the effective phase the resolver computes for this merchant. The" [ref=f1e440]
+              - row [ref=f1e443]:
+                - cell [ref=f1e444] [cursor=pointer]
+                - 'cell "@@ -271,6 +296,11 @@ func main() {" [ref=f1e445]'
+              - row [ref=f1e447]:
+                - cell "271 296" [ref=f1e448] [cursor=pointer]:
+                  - generic [ref=f1e449]: "271"
+                  - generic [ref=f1e450]: "296"
+                - 'cell "fmt.Printf(\"Nickname (original): %q\\n\", user.Nickname)" [ref=f1e451]'
+              - row [ref=f1e454]:
+                - cell "272 297" [ref=f1e455] [cursor=pointer]:
+                  - generic [ref=f1e456]: "272"
+                  - generic [ref=f1e457]: "297"
+                - 'cell "fmt.Printf(\"NicknameCipher: %s\\n\", user.NicknameCipher)" [ref=f1e458]'
+              - row [ref=f1e461]:
+                - cell "273 298" [ref=f1e462] [cursor=pointer]:
+                  - generic [ref=f1e463]: "273"
+                  - generic [ref=f1e464]: "298"
+                - 'cell "fmt.Printf(\"NicknameBindex: %s\\n\", user.NicknameBindex)" [ref=f1e465]'
+              - row [ref=f1e468]:
+                - cell "299" [ref=f1e469] [cursor=pointer]
+                - 'cell "+ fmt.Printf(\"PhonesCipher: %s\\n\", user.PhonesCipher)" [ref=f1e471]':
+                  - generic [ref=f1e472]:
+                    - text: +
+                    - generic [ref=f1e473]: "fmt.Printf(\"PhonesCipher: %s\\n\", user.PhonesCipher)"
+              - row [ref=f1e474]:
+                - cell "300" [ref=f1e475] [cursor=pointer]
+                - 'cell "+ fmt.Printf(\"PhonesBindex: %v\\n\", user.PhonesBindex)" [ref=f1e477]':
+                  - generic [ref=f1e478]:
+                    - text: +
+                    - generic [ref=f1e479]: "fmt.Printf(\"PhonesBindex: %v\\n\", user.PhonesBindex)"
+              - row [ref=f1e480]:
+                - cell "301" [ref=f1e481] [cursor=pointer]
+                - 'cell "+ fmt.Printf(\"Scores[0].ValueCipher: %s\\n\", user.Scores[0].ValueCipher)" [ref=f1e483]':
+                  - generic [ref=f1e484]:
+                    - text: +
+                    - generic [ref=f1e485]: "fmt.Printf(\"Scores[0].ValueCipher: %s\\n\", user.Scores[0].ValueCipher)"
+              - row [ref=f1e486]:
+                - cell "302" [ref=f1e487] [cursor=pointer]
+                - 'cell "+ fmt.Printf(\"Scores[0].ValueBindex: %s\\n\", user.Scores[0].ValueBindex)" [ref=f1e489]':
+                  - generic [ref=f1e490]:
+                    - text: +
+                    - generic [ref=f1e491]: "fmt.Printf(\"Scores[0].ValueBindex: %s\\n\", user.Scores[0].ValueBindex)"
+              - row [ref=f1e492]:
+                - cell "303" [ref=f1e493] [cursor=pointer]
+                - 'cell "+ fmt.Printf(\"Items[0]: %v\\n\", user.Items[0])" [ref=f1e495]':
+                  - generic [ref=f1e496]:
+                    - text: +
+                    - generic [ref=f1e497]: "fmt.Printf(\"Items[0]: %v\\n\", user.Items[0])"
+              - row [ref=f1e498]:
+                - cell "274 304" [ref=f1e499] [cursor=pointer]:
+                  - generic [ref=f1e500]: "274"
+                  - generic [ref=f1e501]: "304"
+                - cell "fmt.Println()" [ref=f1e502]
+              - row [ref=f1e505]:
+                - cell "275 305" [ref=f1e506] [cursor=pointer]:
+                  - generic [ref=f1e507]: "275"
+                  - generic [ref=f1e508]: "305"
+                - cell [ref=f1e509]
+              - row [ref=f1e512]:
+                - cell "276 306" [ref=f1e513] [cursor=pointer]:
+                  - generic [ref=f1e514]: "276"
+                  - generic [ref=f1e515]: "306"
+                - cell "// --- Decrypt ---" [ref=f1e516]
+              - row [ref=f1e519]:
+                - cell [ref=f1e520] [cursor=pointer]
+                - 'cell "@@ -288,6 +318,9 @@ func main() {" [ref=f1e521]'
+              - row [ref=f1e523]:
+                - cell "288 318" [ref=f1e524] [cursor=pointer]:
+                  - generic [ref=f1e525]: "288"
+                  - generic [ref=f1e526]: "318"
+                - 'cell "fmt.Printf(\"Metadata: %v\\n\", user.Metadata)" [ref=f1e527]'
+              - row [ref=f1e530]:
+                - cell "289 319" [ref=f1e531] [cursor=pointer]:
+                  - generic [ref=f1e532]: "289"
+                  - generic [ref=f1e533]: "319"
+                - 'cell "fmt.Printf(\"Address: %v\\n\", user.Address)" [ref=f1e534]'
+              - row [ref=f1e537]:
+                - cell "290 320" [ref=f1e538] [cursor=pointer]:
+                  - generic [ref=f1e539]: "290"
+                  - generic [ref=f1e540]: "320"
+                - 'cell "fmt.Printf(\"Nickname: %q\\n\", user.Nickname)" [ref=f1e541]'
+              - row [ref=f1e544]:
+                - cell "321" [ref=f1e545] [cursor=pointer]
+                - 'cell "+ fmt.Printf(\"Phones: %v %v %v\\n\", *user.Phones[0], user.Phones[1], *user.Phones[2])" [ref=f1e547]':
+                  - generic [ref=f1e548]:
+                    - text: +
+                    - generic [ref=f1e549]: "fmt.Printf(\"Phones: %v %v %v\\n\", *user.Phones[0], user.Phones[1], *user.Phones[2])"
+              - row [ref=f1e550]:
+                - cell "322" [ref=f1e551] [cursor=pointer]
+                - 'cell "+ fmt.Printf(\"Scores: %+v\\n\", user.Scores)" [ref=f1e553]':
+                  - generic [ref=f1e554]:
+                    - text: +
+                    - generic [ref=f1e555]: "fmt.Printf(\"Scores: %+v\\n\", user.Scores)"
+              - row [ref=f1e556]:
+                - cell "323" [ref=f1e557] [cursor=pointer]
+                - 'cell "+ fmt.Printf(\"Items: %v\\n\", user.Items)" [ref=f1e559]':
+                  - generic [ref=f1e560]:
+                    - text: +
+                    - generic [ref=f1e561]: "fmt.Printf(\"Items: %v\\n\", user.Items)"
+              - row [ref=f1e562]:
+                - cell "291 324" [ref=f1e563] [cursor=pointer]:
+                  - generic [ref=f1e564]: "291"
+                  - generic [ref=f1e565]: "324"
+                - cell "fmt.Println()" [ref=f1e566]
+              - row [ref=f1e569]:
+                - cell "292 325" [ref=f1e570] [cursor=pointer]:
+                  - generic [ref=f1e571]: "292"
+                  - generic [ref=f1e572]: "325"
+                - cell [ref=f1e573]
+              - row [ref=f1e576]:
+                - cell "293 326" [ref=f1e577] [cursor=pointer]:
+                  - generic [ref=f1e578]: "293"
+                  - generic [ref=f1e579]: "326"
+                - cell "// --- Query helpers ---" [ref=f1e580]
+              - row [ref=f1e583]:
+                - cell [ref=f1e584] [cursor=pointer]
+                - 'cell "@@ -331,4 +364,16 @@ func main() {" [ref=f1e585]'
+              - row [ref=f1e587]:
+                - cell "331 364" [ref=f1e588] [cursor=pointer]:
+                  - generic [ref=f1e589]: "331"
+                  - generic [ref=f1e590]: "364"
+                - 'cell "}" [ref=f1e591]'
+              - row [ref=f1e594]:
+                - cell "332 365" [ref=f1e595] [cursor=pointer]:
+                  - generic [ref=f1e596]: "332"
+                  - generic [ref=f1e597]: "365"
+                - 'cell "fmt.Printf(\"Class-floor scalar filter: %v\\n\"," [ref=f1e598]'
+              - row [ref=f1e601]:
+                - cell "333 366" [ref=f1e602] [cursor=pointer]:
+                  - generic [ref=f1e603]: "333"
+                  - generic [ref=f1e604]: "366"
+                - 'cell "bson.M{floorKey: floorValue})" [ref=f1e605]'
+              - row [ref=f1e608]:
+                - cell "367" [ref=f1e609] [cursor=pointer]
+                - cell "+" [ref=f1e611]
+              - row [ref=f1e614]:
+                - cell "368" [ref=f1e615] [cursor=pointer]
+                - cell "+ // Array paths route the same way. \"items.sku\" addresses the sku key inside" [ref=f1e617]:
+                  - generic [ref=f1e618]:
+                    - text: +
+                    - generic [ref=f1e619]: // Array paths route the same way. "items.sku" addresses the sku key inside
+              - row [ref=f1e620]:
+                - cell "369" [ref=f1e621] [cursor=pointer]
+                - cell "+ // each element of Items; at double_read / encrypted_only the key becomes" [ref=f1e623]:
+                  - generic [ref=f1e624]:
+                    - text: +
+                    - generic [ref=f1e625]: // each element of Items; at double_read / encrypted_only the key becomes
+              - row [ref=f1e626]:
+                - cell "370" [ref=f1e627] [cursor=pointer]
+                - cell "+ // \"items.sku_bindex\", which MongoDB matches element-wise (multikey index)." [ref=f1e629]:
+                  - generic [ref=f1e630]:
+                    - text: +
+                    - generic [ref=f1e631]: // "items.sku_bindex", which MongoDB matches element-wise (multikey index).
+              - row [ref=f1e632]:
+                - cell "371" [ref=f1e633] [cursor=pointer]
+                - cell "+ // A whole-array field such as \"phones\" routes to \"phones_bindex\", whose" [ref=f1e635]:
+                  - generic [ref=f1e636]:
+                    - text: +
+                    - generic [ref=f1e637]: // A whole-array field such as "phones" routes to "phones_bindex", whose
+              - row [ref=f1e638]:
+                - cell "372" [ref=f1e639] [cursor=pointer]
+                - cell "+ // per-element blind indexes are matched the same way." [ref=f1e641]:
+                  - generic [ref=f1e642]:
+                    - text: +
+                    - generic [ref=f1e643]: // per-element blind indexes are matched the same way.
+              - row [ref=f1e644]:
+                - cell "373" [ref=f1e645] [cursor=pointer]
+                - 'cell "+ itemKey, itemValue, err := client.QueryFieldForMerchant(ctx, merchantID, &User{}, \"items.sku\", \"A1\")" [ref=f1e647]':
+                  - generic [ref=f1e648]:
+                    - text: +
+                    - generic [ref=f1e649]: "itemKey, itemValue, err := client.QueryFieldForMerchant(ctx, merchantID, &User{}, \"items.sku\", \"A1\")"
+              - row [ref=f1e650]:
+                - cell "374" [ref=f1e651] [cursor=pointer]
+                - 'cell "+ if err != nil {" [ref=f1e653]':
+                  - generic [ref=f1e654]:
+                    - text: +
+                    - generic [ref=f1e655]: "if err != nil {"
+              - row [ref=f1e656]:
+                - cell "375" [ref=f1e657] [cursor=pointer]
+                - 'cell "+ log.Fatalf(\"query array element field: %v\", err)" [ref=f1e659]':
+                  - generic [ref=f1e660]:
+                    - text: +
+                    - generic [ref=f1e661]: "log.Fatalf(\"query array element field: %v\", err)"
+              - row [ref=f1e662]:
+                - cell "376" [ref=f1e663] [cursor=pointer]
+                - 'cell "+ }" [ref=f1e665]':
+                  - generic [ref=f1e666]:
+                    - text: +
+                    - generic [ref=f1e667]: "}"
+              - row [ref=f1e668]:
+                - cell "377" [ref=f1e669] [cursor=pointer]
+                - 'cell "+ fmt.Printf(\"Array element filter for merchant %q: %v\\n\"," [ref=f1e671]':
+                  - generic [ref=f1e672]:
+                    - text: +
+                    - generic [ref=f1e673]: "fmt.Printf(\"Array element filter for merchant %q: %v\\n\","
+              - row [ref=f1e674]:
+                - cell "378" [ref=f1e675] [cursor=pointer]
+                - 'cell "+ merchantID, bson.M{itemKey: itemValue})" [ref=f1e677]':
+                  - generic [ref=f1e678]:
+                    - text: +
+                    - generic [ref=f1e679]: "merchantID, bson.M{itemKey: itemValue})"
+              - row [ref=f1e680]:
+                - cell "334 379" [ref=f1e681] [cursor=pointer]:
+                  - generic [ref=f1e682]: "334"
+                  - generic [ref=f1e683]: "379"
+                - 'cell "}" [ref=f1e684]'
