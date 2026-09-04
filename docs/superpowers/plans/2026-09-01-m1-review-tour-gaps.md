@@ -1825,6 +1825,24 @@ Neither run reproduces the other. `string→[]byte` never fires in either — pl
 
 **Kept anyway, on narrower grounds:** the previous rule was provably wrong against W3, and a quality gauge that can never move is worse than one that occasionally over-reads. But **non-claim typing (`misc`, `mechanical`) is nondeterministic run to run** — that is the real open problem, and it is not a prompt-wording problem. Deliberately NOT attempted: a third reword fitted to a single non-reproducing sample (the mistake the fold guards taught). What would actually settle it: run each golden N times per variant and compare distributions — the harness supports it, it just costs LLM calls. `mechanical` under-fires for a separate reason (apigw's NIT churn is hunk-level inside a shared test file, while the rule's examples are all whole-file).
 
+## Adversarial review by Codex (2026-09-04)
+
+An independent review by a different model family (`codex exec`, GPT) over the whole branch. Its verdict was **"I would block this merge"** with 7 findings; 5 were real and are fixed, 2 are recorded below as accepted. Every finding was reproduced with a failing test before being fixed, and each fix mutation-checked.
+
+Note on running it: the first attempt was refused by OpenAI's cyber-risk filter because the prompt asked for prompt-injection and XSS bypasses. Re-running with the same correctness questions minus the exploit framing completed normally — so **the injection/XSS surface did NOT get an independent adversarial pass** and remains reviewed only by Claude agents.
+
+| # | finding | status |
+|---|---|---|
+| 1 | Files with no `---`/`+++` headers (binary, pure rename, mode-only) were invisible everywhere; a PR of only such files failed with "no diff to review". Two deleted PNGs really were dropped from the shopline golden. | **fixed** (`53058b1`) — new-here `recoverSegmentPaths` reads the `diff --git` line; copied `segmentPath` untouched. 217→219 paths, and the deletion fold now holds the 217 members the expected file always claimed |
+| 2 | `segmentStat` skipped hunk lines starting with `+++`/`---`, but inside a hunk those are ordinary changes (`++counter;`, a removed YAML `---`). Churn — which the fold share guard and every metric derive from — was undercounted. | **fixed** (`3abd9f3`). Both tests that pinned the old behavior encoded the wrong expectation and were corrected |
+| 3 | A file named `__proto__` or `constructor` made `renderedWhole[path]` truthy before anything rendered, so `subFor` skipped its diff. | **fixed** (`3abd9f3`) — null-prototype path maps |
+| 4 | `buildPromptInput` measured truncation in raw bytes then added `### hunk` markers without re-checking, so `len(Hunks)` could exceed the budget (528 > 520 reproduced). | **fixed** (`3abd9f3`) — over-budget truncation degrades to Omitted |
+| 5 | `FoldedLines` counted folds whose summary line never fit and whose members degraded to Omitted, overstating `folded_lines_pct`. | **fixed** (`3abd9f3`) — counts only emitted folds |
+| 6 | `notes#1` as a literal filename collides with the `path#N` hunk-ref microformat. | **accepted.** Deliberate precedence (exact path wins), already pinned by `TestResolveRef`. Partition still holds — the shadowed hunk sweeps into the fallback bucket. Changing the microformat costs more than the pathological input is worth |
+| 7 | The golden harness never fails on grouping content, so it cannot substantiate quality claims. | **accepted as designed** (handoff W6: 判分不用全自動 — human-judged). Its concrete sub-points were real and are fixed: the tracked expected file said `<30KB` and 217 members while reality was 31.4KB and 215; it now states measured numbers and records the <30KB target as **still missed by ~1.4KB**, not passed |
+
+Post-fix golden run: all three pass; shopline folds 14,877 lines into one 217-member deletion cohort at 31.4KB with 0 omitted; apigw-18 produced both a `[misc]` and a `[mechanical]` cohort — the closest any run has come to the handoff's expectation, though non-claim typing remains nondeterministic.
+
 ## Self-review notes
 
 - **Handoff coverage**: W1 → Tasks 3/4/5 (prompt-side folding, all paths listed, greedy budget kept as backstop, <30KB acceptance observable via the stderr/harness size print); W2 → Tasks 2/8 (Claim question-form + Type, deletion three questions, nonfix rule, badges, collapsed defaults); W3 → Task 6 (semantic misc first, fallback bucket renamed and kept last — two buckets, not merged); W4 → Task 7 (exact schema incl. error lines, `runs.jsonl`); W6 → Task 10; W5 → Task 12 (optional, as the handoff marks it); acceptance checklist → Task 11 (incl. `go vet`).
