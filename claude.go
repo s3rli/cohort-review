@@ -1,6 +1,11 @@
 // Adapted from code-review-agent internal/agent/claude.go — keep parity for
 // same-source convergence. Collapsed to a single grouping call: hardcoded flag
 // set, no telemetry, no tool scopes.
+//
+// DELIBERATE DIVERGENCE: extractClaudeResult also accepts the CLI's stream-event
+// array output. Upstream still assumes the single {"result": …} envelope and is
+// broken against current CLI versions the same way this was — carry this fix
+// across at convergence rather than reverting it.
 package main
 
 import (
@@ -61,14 +66,29 @@ func claudeFailure(err error, stdout, stderr []byte) error {
 }
 
 // extractClaudeResult unwraps the assistant text from the Claude CLI's
-// --output-format json envelope ({"result": "...", ...}). Idempotent on
-// non-envelope output.
+// --output-format json output. The CLI emits either a single envelope object
+// ({"result": "...", ...}) or an array of stream events ending in a "result"
+// event carrying the same field — current versions do the latter, and without
+// this the whole array reached the JSON parser as if it were the answer.
+// Idempotent on non-envelope output.
 func extractClaudeResult(output []byte) string {
 	var obj struct {
 		Result string `json:"result"`
 	}
 	if err := json.Unmarshal(output, &obj); err == nil && obj.Result != "" {
 		return obj.Result
+	}
+	var events []struct {
+		Type   string `json:"type"`
+		Result string `json:"result"`
+	}
+	if err := json.Unmarshal(output, &events); err == nil {
+		// Last one wins: the result event is emitted at the end of the turn.
+		for i := len(events) - 1; i >= 0; i-- {
+			if events[i].Type == "result" && events[i].Result != "" {
+				return events[i].Result
+			}
+		}
 	}
 	return string(output)
 }
