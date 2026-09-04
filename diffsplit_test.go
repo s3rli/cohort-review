@@ -110,3 +110,30 @@ func TestSegmentStat(t *testing.T) {
 		}
 	}
 }
+
+// TestRecoverSegmentPaths pins that files with no ---/+++ headers — binary
+// changes, pure renames, mode-only changes — are still named. Without this a
+// PR made only of such files looks like it has no diff at all.
+func TestRecoverSegmentPaths(t *testing.T) {
+	cases := []struct{ raw, want string }{
+		{"diff --git a/img/run.png b/img/run.png\ndeleted file mode 100644\nBinary files a/img/run.png and /dev/null differ\n", "img/run.png"},
+		{"diff --git a/old.go b/new.go\nsimilarity index 100%\nrename from old.go\nrename to new.go\n", "new.go"},
+		{"diff --git a/s.sh b/s.sh\nold mode 100644\nnew mode 100755\n", "s.sh"},
+		{"diff --git a/has space.txt b/has space.txt\nBinary files differ\n", "has space.txt"},
+		// Git C-quotes unusual paths; those stay unrecovered rather than mangled.
+		{"diff --git \"a/od\\303\\251.txt\" \"b/od\\303\\251.txt\"\nBinary files differ\n", ""},
+		// Preamble content is not a file and must stay empty.
+		{"warning: something\n", ""},
+	}
+	for _, c := range cases {
+		got := recoverSegmentPaths([]FileSegment{{Raw: c.raw}})[0].Path
+		if got != c.want {
+			t.Errorf("recoverSegmentPaths(%.40q) = %q, want %q", c.raw, got, c.want)
+		}
+	}
+	// An already-resolved path is never overwritten.
+	segs := recoverSegmentPaths([]FileSegment{{Path: "real.go", Raw: "diff --git a/other.go b/other.go\n"}})
+	if segs[0].Path != "real.go" {
+		t.Errorf("existing path overwritten: %q", segs[0].Path)
+	}
+}

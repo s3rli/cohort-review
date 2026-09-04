@@ -1,8 +1,8 @@
 // Copied from code-review-agent internal/vcs/diffsplit.go, plus diffFileHeader
 // from internal/vcs/diffmap.go — keep parity for same-source convergence.
-// deriveNameStatus and segmentStat are new here: the CLI has no local
-// checkout to run `git diff --name-status` in, so status is derived from
-// segment headers.
+// deriveNameStatus, segmentStat and recoverSegmentPaths are new here: the CLI
+// has no local checkout to run `git diff --name-status` in, so status is
+// derived from segment headers.
 package main
 
 import (
@@ -139,4 +139,39 @@ func deriveNameStatus(segs []FileSegment) string {
 		fmt.Fprintf(&b, "%s\t%s\t+%d/-%d\n", status, s.Path, added, deleted)
 	}
 	return b.String()
+}
+
+// recoverSegmentPaths fills in paths segmentPath could not derive. Binary
+// changes, pure renames and mode-only changes carry no "--- a/"/"+++ b/"
+// headers, so their Path is empty and the file becomes invisible to grouping,
+// metrics and the page — a PR made only of such files looks like it has no
+// diff at all. The "diff --git a/X b/X" line still names them; renames take
+// the new-side path, matching segmentPath's b/ preference.
+func recoverSegmentPaths(segs []FileSegment) []FileSegment {
+	for i := range segs {
+		if segs[i].Path == "" {
+			segs[i].Path = gitHeaderPath(segs[i].Raw)
+		}
+	}
+	return segs
+}
+
+// gitHeaderPath reads the new-side path out of a leading "diff --git" line.
+// Git C-quotes paths containing unusual bytes; those are left to the caller as
+// "" rather than mis-parsed, preserving today's behavior for them.
+func gitHeaderPath(raw string) string {
+	line, _, _ := strings.Cut(raw, "\n")
+	rest, ok := strings.CutPrefix(line, "diff --git a/")
+	if !ok {
+		return ""
+	}
+	i := strings.Index(rest, " b/")
+	if i < 0 {
+		return ""
+	}
+	p := rest[i+len(" b/"):]
+	if strings.HasPrefix(p, "\"") || p == "" {
+		return ""
+	}
+	return p
 }

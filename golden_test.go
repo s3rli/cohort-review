@@ -47,7 +47,7 @@ func TestGolden(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			segs := SplitUnifiedDiff(string(diff))
+			segs := recoverSegmentPaths(SplitUnifiedDiff(string(diff)))
 			group := func(ctx context.Context, prompt string) (string, error) {
 				fmt.Printf("[%s] prompt: %d KB total\n", name, len(prompt)/1024)
 				return runClaude(ctx, "sonnet", prompt)

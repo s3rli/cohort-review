@@ -61,7 +61,7 @@ func (a *app) load(ctx context.Context, ref PRRef) error {
 	if err != nil {
 		return fail(err)
 	}
-	segs := SplitUnifiedDiff(diff)
+	segs := recoverSegmentPaths(SplitUnifiedDiff(diff))
 	paths := segmentPaths(segs)
 	if len(paths) == 0 {
 		return fail(errors.New("PR has no diff to review"))
