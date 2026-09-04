@@ -19,7 +19,7 @@ func TestPageScriptParses(t *testing.T) {
 	if err != nil {
 		t.Skip("node not in PATH")
 	}
-	page, err := renderPage(PullRequest{Title: "T"}, testGrouping(), "line-by-line")
+	page, err := renderPage(PullRequest{Title: "T"}, testGrouping(), "line-by-line", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,23 +38,24 @@ func TestPageScriptParses(t *testing.T) {
 	}
 }
 
-// TestSplitDiffBlocksMatchesGo runs the page's own splitDiffBlocks in node over
-// both diff styles and checks it indexes exactly the paths SplitUnifiedDiff
-// does. The two are the server and client halves of the same exactly-once
-// invariant; a JS-only "diff --git" split silently collapses a headerless diff
-// into one block. Skipped when node is absent.
+// TestSplitDiffBlocksMatchesGo runs the page's own diff-splitting code in node
+// over both diff styles and checks it indexes exactly the paths
+// SplitUnifiedDiff does. The two are the server and client halves of the same
+// exactly-once invariant. Skipped when node is absent.
 func TestSplitDiffBlocksMatchesGo(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node not in PATH")
 	}
-	page, err := renderPage(PullRequest{Title: "T"}, testGrouping(), "line-by-line")
+	page, err := renderPage(PullRequest{Title: "T"}, testGrouping(), "line-by-line", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fn := regexp.MustCompile(`(?s)function splitDiffBlocks\(raw\) \{.*?\n  \}`).Find(page)
+	// The page splits inline; lift those two lines into a function so the very
+	// same code under test runs here.
+	fn := regexp.MustCompile(`(?m)^\s*const useGitHeaders = .*\n\s*const blocks = .*$`).Find(page)
 	if fn == nil {
-		t.Fatal("splitDiffBlocks not found in the rendered page")
+		t.Fatal("diff-splitting lines not found in the rendered page")
 	}
 	diffs := map[string]string{
 		"git headers": "diff --git a/one.go b/one.go\n--- a/one.go\n+++ b/one.go\n@@ -1 +1 @@\n-a\n+b\n" +
@@ -64,14 +65,13 @@ func TestSplitDiffBlocksMatchesGo(t *testing.T) {
 	}
 	for name, diff := range diffs {
 		var want []string
-		for _, s := range SplitUnifiedDiff(diff) {
-			if s.Path != "" {
-				want = append(want, s.Path)
+		for _, sg := range SplitUnifiedDiff(diff) {
+			if sg.Path != "" {
+				want = append(want, sg.Path)
 			}
 		}
-		// Index exactly as the page does, then print the paths it found.
-		harness := string(fn) + `
-const raw = ` + strconv.Quote(diff) + `;
+		harness := "function splitDiffBlocks(rawDiff) {\n" + string(fn) + "\n  return blocks;\n}\n" +
+			"const raw = " + strconv.Quote(diff) + `;
 const paths = [];
 splitDiffBlocks(raw).forEach(b => {
   const m = b.match(/^\+\+\+ b\/(.+)$/m) || b.match(/^--- a\/(.+)$/m);

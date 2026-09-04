@@ -37,11 +37,11 @@ func TestServerEndpoints(t *testing.T) {
 	// A diff containing a literal </script> must survive byte-for-byte — the
 	// reason the diff is served as its own resource instead of inlined.
 	diff := "diff --git a/x.html b/x.html\n--- a/x.html\n+++ b/x.html\n@@ -1 +1 @@\n-<p>\n+</script><script>alert(1)</script>\n"
-	page, err := renderPage(PullRequest{Title: "My PR", WebURL: "https://bitbucket.org/ws/repo/pull-requests/1"}, testGrouping(), "line-by-line")
+	page, err := renderPage(PullRequest{Title: "My PR", WebURL: "https://bitbucket.org/ws/repo/pull-requests/1"}, testGrouping(), "line-by-line", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &app{page: page, diff: diff}
+	a := &app{page: page, diff: diff, version: 1}
 	srv := httptest.NewServer(a.mux())
 	defer srv.Close()
 
@@ -172,7 +172,7 @@ func TestRenderPageDataRoundTrips(t *testing.T) {
 				Files: []FileRef{{Path: "old/x.go"}, {Path: "old/y.go"}}},
 		},
 	}
-	page, err := renderPage(PullRequest{Title: "T", WebURL: "u"}, g, "side-by-side")
+	page, err := renderPage(PullRequest{Title: "T", WebURL: "u"}, g, "side-by-side", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestRenderPageDataRoundTrips(t *testing.T) {
 
 func TestRenderPageEscapesHostileTitle(t *testing.T) {
 	hostile := `</script><script>alert(1)</script>`
-	page, err := renderPage(PullRequest{Title: hostile}, testGrouping(), "line-by-line")
+	page, err := renderPage(PullRequest{Title: hostile}, testGrouping(), "line-by-line", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,5 +259,46 @@ func TestLoadWritesErrorRecordOnFetchFailure(t *testing.T) {
 	}
 	if r.PR != "ws/r#9" || r.Error == "" {
 		t.Errorf("failed run not recorded: %+v", r)
+	}
+}
+
+// TestDiffVersionGuard pins the fix for a page and a diff coming from
+// different PRs: /load between the page load and the diff fetch would pair one
+// PR's cohorts with another PR's diff, so a stale version must be refused
+// rather than answered.
+func TestDiffVersionGuard(t *testing.T) {
+	a := &app{page: []byte("page"), diff: "the diff", version: 2}
+	srv := httptest.NewServer(a.mux())
+	defer srv.Close()
+
+	if code, body := getBody(t, srv, "/diff.txt?v=2"); code != 200 || body != "the diff" {
+		t.Errorf("current version: code %d, body %q", code, body)
+	}
+	if code, _ := getBody(t, srv, "/diff.txt?v=1"); code != http.StatusConflict {
+		t.Errorf("stale version: code %d, want %d", code, http.StatusConflict)
+	}
+	// No version asked for: still answered, so an older page keeps working.
+	if code, body := getBody(t, srv, "/diff.txt"); code != 200 || body != "the diff" {
+		t.Errorf("no version: code %d, body %q", code, body)
+	}
+}
+
+// TestPageCarriesVersion pins that the page states the version it was rendered
+// from — without it the guard above has nothing to compare.
+func TestPageCarriesVersion(t *testing.T) {
+	page, err := renderPage(PullRequest{Title: "T"}, testGrouping(), "line-by-line", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`const PAGE = (.*);`).FindSubmatch(page)
+	if m == nil {
+		t.Fatal("const PAGE not found")
+	}
+	var got pageData
+	if err := json.Unmarshal(m[1], &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Version != 7 {
+		t.Errorf("version round-trip: got %d, want 7", got.Version)
 	}
 }

@@ -6,3 +6,9 @@ https://cdn.jsdelivr.net/npm/diff2html@3.4.56/bundles/js/diff2html-ui.min.js
 highlight.js themes 11.9.0 (highlighting itself is bundled inside diff2html-ui.min.js)
 https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github.min.css
 https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css
+
+IBM Plex Sans 400/500/600 + IBM Plex Mono 400/500 (latin, latin-ext subsets)
+https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap
+woff2 files under assets/fonts/, @font-face rules in assets/ibm-plex.css.
+SIL Open Font License 1.1. Update by re-running the same Google Fonts query
+and re-downloading the latin/latin-ext faces — never fetched at runtime.
