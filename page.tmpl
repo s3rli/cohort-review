@@ -165,12 +165,15 @@
   // fileBlocks: path → {block, parts}. parts mirrors Go's splitSegmentHunks:
   // parts[0] is the file header, hunk N is parts[N]. parts = null marks the
   // path unsplittable — hunk refs then render the whole block instead.
-  let fileBlocks = {};
+  // Null-prototype: a file legitimately named __proto__ or constructor would
+  // otherwise collide with Object.prototype — renderedWhole[path] reads truthy
+  // before anything is rendered, and subFor would skip that file's diff.
+  let fileBlocks = Object.create(null);
 
   // Paths whose whole block was already emitted this build: an unsplittable
   // path referenced from several cohorts renders at its FIRST ref only, so the
   // full diff stays on the page exactly once. Reset by every build().
-  let renderedWhole = {};
+  let renderedWhole = Object.create(null);
 
   // markUnsplittable runs once, BEFORE any rendering: an out-of-range hunk
   // index means our split disagrees with the server's ground truth, so the
@@ -225,7 +228,7 @@
     const nav = document.getElementById("nav");
     const sections = document.getElementById("sections");
     nav.innerHTML = ""; sections.innerHTML = "";
-    renderedWhole = {};
+    renderedWhole = Object.create(null);
     if (io) io.disconnect();
     cohortState.length = 0;
     let tAdd = 0, tDel = 0;

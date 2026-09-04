@@ -773,3 +773,47 @@ func TestGroupCohortsEmptyGroupingsDegrade(t *testing.T) {
 		t.Fatalf("empty groupings must degrade: %+v", g)
 	}
 }
+
+// TestBuildPromptInputNeverExceedsBudget pins the budget as a hard cap.
+// trimSegment measures raw bytes while the budget counts annotated bytes, so a
+// truncated segment could overflow once its "### hunk" markers were added.
+func TestBuildPromptInputNeverExceedsBudget(t *testing.T) {
+	aRaw := "diff --git a/a.go b/a.go\n--- a/a.go\n+++ b/a.go\n@@ -1,41 +1,41 @@\n" +
+		strings.Repeat(" context\n", 40) + "-x\n+y\n"
+	bRaw := "diff --git a/b.go b/b.go\n--- a/b.go\n+++ b/b.go\n@@ -1 +1 @@\n-c\n+d\n"
+	segs := []FileSegment{{Path: "a.go", Raw: aRaw}, {Path: "b.go", Raw: bRaw}}
+	annA := len(annotateSegmentHunks("a.go", aRaw))
+	// Sweep the window where b.go trims but its markers can push it over.
+	for budget := annA; budget <= annA+len(bRaw)+40; budget++ {
+		in := buildPromptInput(segs, nil, budget)
+		if len(in.Hunks) > budget {
+			t.Fatalf("budget %d exceeded: len(Hunks) = %d", budget, len(in.Hunks))
+		}
+	}
+}
+
+// TestFoldedLinesCountsOnlyEmittedFolds pins that a fold whose summary line did
+// not fit reports zero folded churn — its members degrade to Omitted like any
+// budget casualty, so counting them as folded would overstate folded_lines_pct.
+func TestFoldedLinesCountsOnlyEmittedFolds(t *testing.T) {
+	lead := FileSegment{Path: "lead.go", Raw: "diff --git a/lead.go b/lead.go\n--- a/lead.go\n+++ b/lead.go\n@@ -1,120 +1,120 @@\n" +
+		strings.Repeat("-o\n+n\n", 60)}
+	segs := append([]FileSegment{lead}, fiveDels()...)
+	folds := foldSegments(segs)
+	if len(folds) != 1 {
+		t.Fatalf("expected one deletion fold, got %+v", folds)
+	}
+	tight := len(annotateSegmentHunks("lead.go", lead.Raw)) + len(foldLine(folds[0])) - 1
+	in := buildPromptInput(segs, folds, tight)
+	if strings.Contains(in.Hunks, "### DELETED") {
+		t.Fatal("fold line unexpectedly fit the tight budget")
+	}
+	if in.FoldedLines != 0 || len(in.Omitted) != 5 {
+		t.Errorf("unemitted fold reported as folded: FoldedLines=%d omitted=%d", in.FoldedLines, len(in.Omitted))
+	}
+	// With room, the same fold is emitted and its churn IS folded.
+	roomy := buildPromptInput(segs, folds, defaultBudget)
+	if !strings.Contains(roomy.Hunks, "### DELETED") || roomy.FoldedLines != folds[0].Lines {
+		t.Errorf("emitted fold not counted: FoldedLines=%d want %d", roomy.FoldedLines, folds[0].Lines)
+	}
+}

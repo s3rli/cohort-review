@@ -107,12 +107,16 @@ func segmentStat(s FileSegment) (status string, added, deleted int) {
 			}
 			continue
 		}
-		// The +++/--- guard matters only for diff-of-a-diff content,
-		// where an added line can itself be a file header.
+		// Inside a hunk every line carries exactly a one-character prefix, so
+		// a "+++"/"---" line here is an ordinary change whose CONTENT starts
+		// with "++"/"--" (`++counter;`, a removed YAML `---` separator). File
+		// headers cannot appear here: they precede the first "@@ ", and in a
+		// diff-of-a-diff an added header reads "++++ b/x". Skipping them
+		// undercounted churn, which the fold share guard and metrics rely on.
 		switch {
-		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
+		case strings.HasPrefix(line, "+"):
 			added++
-		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
+		case strings.HasPrefix(line, "-"):
 			deleted++
 		}
 	}

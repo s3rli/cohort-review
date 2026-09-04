@@ -90,9 +90,15 @@ func TestSegmentStat(t *testing.T) {
 		{"diff --git a/n.go b/n.go\nnew file mode 100644\n+++ b/n.go\n@@ -0,0 +1,2 @@\n+a\n+b\n", "A", 2, 0},
 		{"diff --git a/d.go b/d.go\ndeleted file mode 100644\n--- a/d.go\n@@ -1,2 +0,0 @@\n-a\n-b\n", "D", 0, 2},
 		{"diff --git a/o.go b/r.go\nrename from o.go\nrename to r.go\n", "R", 0, 0},
-		// Pins the +++/--- guard: diff-of-a-diff hunk bodies contain literal
-		// file-header lines that must not count as churn.
-		{"diff --git a/p.patch b/p.patch\n--- a/p.patch\n+++ b/p.patch\n@@ -1,4 +1,4 @@\n+++ b/inner.go\n--- a/inner.go\n+real\n-gone\n", "M", 1, 1},
+		// Inside a hunk, "+++"/"---" lines are ordinary changes whose content
+		// starts with "++"/"--" — not file headers, which cannot appear after
+		// the first "@@ ". Counting them as churn is what the fold share guard
+		// and metrics depend on.
+		{"diff --git a/p.patch b/p.patch\n--- a/p.patch\n+++ b/p.patch\n@@ -1,4 +1,4 @@\n+++ b/inner.go\n--- a/inner.go\n+real\n-gone\n", "M", 2, 2},
+		// The reachable real-world shapes: prefix increment/decrement in
+		// C-like code, and a removed YAML/front-matter "---" separator.
+		{"diff --git a/x.js b/x.js\n--- a/x.js\n+++ b/x.js\n@@ -1,2 +1,2 @@\n+++counter;\n---counter;\n", "M", 1, 1},
+		{"diff --git a/c.yml b/c.yml\n--- a/c.yml\n+++ b/c.yml\n@@ -1 +1 @@\n----\n+key: v\n", "M", 1, 1},
 		// Pins the inHunk gate: nothing before the first "@@ " counts.
 		{"diff --git a/w.go b/w.go\n-preamble noise\n--- a/w.go\n+++ b/w.go\n@@ -1 +1 @@\n+y\n", "M", 1, 0},
 	}

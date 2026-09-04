@@ -55,14 +55,15 @@ func TestComputeRecord(t *testing.T) {
 }
 
 func TestComputeRecordChurnEdges(t *testing.T) {
-	// Non-uniform hunks so a hunk-index slip is visible, and a "+++"-looking
-	// added line (diff-of-a-diff) that must not be counted.
+	// Non-uniform hunks so a hunk-index slip is visible. "+++ e" inside a hunk
+	// is an ordinary added line whose content is "++ e" — it counts, so hunk 2
+	// is 3 lines of a 5-line total.
 	segs := []FileSegment{seg("v.go",
 		"diff --git a/v.go b/v.go\n@@ -1 +1 @@\n-a\n+b\n@@ -9,2 +9,4 @@\n ctx\n-c\n+d\n+++ e\n")}
 	g := Grouping{Cohorts: []Cohort{{Name: "m", Type: "misc", Files: []FileRef{{Path: "v.go", Hunks: []int{2}}}}}}
 	r := computeRecord(PRRef{"ws", "r", 1}, "m", PullRequest{}, g, segs, 1)
-	if r.Lines != 4 || r.MiscLinesPct != 50 {
-		t.Errorf("lines=%d misc=%v, want 4 / 50", r.Lines, r.MiscLinesPct)
+	if r.Lines != 5 || r.MiscLinesPct != 60 {
+		t.Errorf("lines=%d misc=%v, want 5 / 60", r.Lines, r.MiscLinesPct)
 	}
 	// A path-bearing segment with no hunks must not divide by zero: an
 	// unguarded NaN makes the whole record unmarshalable and it vanishes.

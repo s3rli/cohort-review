@@ -108,6 +108,7 @@ type promptInput struct {
 	Hunks       string   // concatenated segments that fit the budget, diff order
 	Omitted     []string // paths whose hunks were dropped to fit the budget
 	Truncated   []string // paths reduced to their leading hunks to fit the budget
+	FoldedLines int      // churn actually replaced by an emitted summary line
 }
 
 // buildPromptInput assembles the model input from per-file segments. Fold
@@ -149,6 +150,7 @@ func buildPromptInput(segs []FileSegment, folds []Fold, budget int) promptInput 
 			if used+len(line) <= budget {
 				hunks.WriteString(line)
 				used += len(line)
+				in.FoldedLines += f.Lines
 			} else {
 				// No room even for the summary: degrade the members to the
 				// honest Omitted list instead of vanishing.
@@ -162,15 +164,20 @@ func buildPromptInput(segs []FileSegment, folds []Fold, budget int) promptInput 
 			used += len(ann)
 			continue
 		}
-		// trimSegment allowance checks raw bytes while used counts annotated
-		// bytes — the cap is a heuristic and may overshoot by the marker
-		// lines; the budget itself stays truthful.
+		// trimSegment's allowance is in raw bytes while used counts annotated
+		// bytes, so the trimmed segment can still overflow once its "### hunk"
+		// markers are added — re-check afterwards and degrade to Omitted, or
+		// len(Hunks) would exceed the budget this function promises.
 		trimmed := trimSegment(s.Raw, min(perFileCap, budget-used))
 		if trimmed == "" {
 			in.Omitted = append(in.Omitted, s.Path)
 			continue
 		}
 		ta := annotateSegmentHunks(s.Path, trimmed)
+		if used+len(ta) > budget {
+			in.Omitted = append(in.Omitted, s.Path)
+			continue
+		}
 		hunks.WriteString(ta)
 		used += len(ta)
 		in.Truncated = append(in.Truncated, s.Path)
@@ -307,11 +314,11 @@ type groupFunc func(ctx context.Context, prompt string) (string, error)
 func groupCohorts(ctx context.Context, run groupFunc, pr PullRequest, segs []FileSegment, budget int) Grouping {
 	idx := indexSegments(segs)
 	folds := foldSegments(segs)
-	foldedLines := 0
-	for _, f := range folds {
-		foldedLines += f.Lines
-	}
 	in := buildPromptInput(segs, folds, budget)
+	// Folds whose summary line did not fit the budget degraded to Omitted —
+	// their churn was never hidden behind a fold, so it must not be reported
+	// as folded.
+	foldedLines := in.FoldedLines
 	in.Title, in.Description = pr.Title, pr.Description
 	prompt := buildCohortPrompt(in, NewNonce())
 	fmt.Fprintf(os.Stderr, "cohort-review: prompt hunks %d KB (%d lines folded, %d omitted, %d truncated)\n",
