@@ -1862,9 +1862,15 @@ Codex's cyber-risk filter refused the injection/XSS framing, so that surface was
 
 Reviewed and found sound, with reasons recorded rather than asserted: the nonce fence (Scrub neutralizes the marker pre-fencing), column-0 marker forgery inside the diff fence (body lines always carry a +/-/space prefix), and the page's HTML escaping (every attacker-influenced string goes through `esc()` or `textContent`).
 
-**Accepted, not fixed** — `fold.go` keys SIMILAR folds on path and size, never content, while the page tells the reviewer to "verify the representative, skim the rest". A backdoor in a non-representative member is the residual risk. The page always renders the full diff and the claim is phrased as a question, but the framing invites a skim. Fixing it means a content-shape check before folding, or page copy that says name-and-size only. **This is a deliberate product conversation, not a defect** — raise it before this heuristic is trusted more.
+**Settled 2026-09-04 — copy fixed, check deferred.** `fold.go` keys SIMILAR folds on path and size, never content, while the page told the reviewer to "verify the representative, skim the rest" — a claim the fold cannot back. The author chose the copy fix over the content-shape check: the tooltip and README now say members were grouped by path and size, not by comparing contents, so the tool stops promising something it never did. The model-facing claim template is deliberately left alone — it already asks "are the rest really the same shape?" rather than asserting it, and it also covers model-typed mechanical cohorts (lockfiles, formatting) where the model DID read the hunks, so hedging it would blanket-hedge a case that does compare content.
 
-Observation from the acceptance runs: on the largest prompt (153KB) the `claude` CLI hit its 3-minute timeout on one attempt; the retry succeeded and, on an earlier run where both attempts timed out, the page degraded to "All changes" and still rendered. Both halves of the always-renders design were exercised in production, but the timeout is marginal at that prompt size.
+**Open follow-up (3 of 3):** a real content-shape check before folding — e.g. normalized added-line overlap between each member and the representative, refusing the fold when they diverge. That is the thing that would let the page recommend skimming honestly. Its absence is now disclosed rather than hidden, so this is a known gap, not a silent one. Worth its own PR.
+
+### Open follow-ups at merge time
+
+1. **Content-shape check for SIMILAR folds** (above) — the copy now admits the fold compares name and size only; making it actually compare content is separate work.
+2. **Non-claim typing is nondeterministic** — apigw-18 produced 3 cohorts on one run and 7 on another, and `misc`/`mechanical` land on different targets between runs. Settling it needs N runs per prompt variant compared as distributions, not another single-sample reword.
+3. **The 3-minute `claude` timeout is marginal on the largest prompts** — on the 153KB dbfle prompt one attempt was SIGKILLed; the retry succeeded, and on an earlier run where both attempts timed out the page degraded to "All changes" and still rendered. Both halves of always-renders were exercised in production, but the margin is thin at that size.
 
 ## Self-review notes
 
