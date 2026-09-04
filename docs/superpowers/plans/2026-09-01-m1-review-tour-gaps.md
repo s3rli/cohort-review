@@ -1843,6 +1843,29 @@ Note on running it: the first attempt was refused by OpenAI's cyber-risk filter 
 
 Post-fix golden run: all three pass; shopline folds 14,877 lines into one 217-member deletion cohort at 31.4KB with 0 omitted; apigw-18 produced both a `[misc]` and a `[mechanical]` cohort — the closest any run has come to the handoff's expectation, though non-claim typing remains nondeterministic.
 
+## Merge with main's page redesign + security pass (2026-09-04)
+
+`main` merged PR #3 (Change Stack Viewer redesign, paged navigation, file pager) while this branch was in review, so PR #2 went CONFLICTING across 7 files. Merged main in rather than rebasing — a rebase would rewrite 36 published commits and replay the page.tmpl conflict at each one. Resolutions:
+
+- **claude.go** — main independently fixed the same CLI array-envelope bug, functionally identically (same two-stage unmarshal, same backwards scan). This branch yields entirely; its extra `TestExtractClaudeResultArrayEnvelope` is kept because main had no test.
+- **page.tmpl** — took main's template whole (it rewrote +890/−185) and re-applied this branch's layers onto it. Type badges and the claim line land in the new header and sidebar. The null-prototype path maps land as a straight bug fix. **Collapse-by-default is dropped as superseded**: main's paged mode already draws only the selected cohort, so the expensive-draw problem collapse solved no longer exists, and a `collapsed` class would fight the mode system.
+- **page splitter** — main fixed the same Go/JS asymmetry inline, so this branch's named `splitDiffBlocks` is dropped. The parity test that found it is kept, retargeted at main's implementation, and verified to still fail when main's fix is reverted — main had no test for it.
+- **server.go / server_test.go** — both sides wanted: metrics recording plus main's `renderPage` version argument; this branch's metrics tests plus main's diff-version guard tests.
+
+### Security pass
+
+Codex's cyber-risk filter refused the injection/XSS framing, so that surface was reviewed adversarially by Fable instead. Three real issues, all fixed in `9f35e64`:
+
+- **Prompt injection (blocker)**: the omitted/truncated NOTE lines interpolated file paths *outside* the data fence, into the zone the rules tell the model to trust. A filename is free text. Both lists are now fenced.
+- **Silent file hiding**: git C-quotes non-ASCII paths by default and quotes the ---/+++ headers too, so such a file had no path anywhere — invisible to the changed-files list, prompt, repair ground truth and page. `gitHeaderPath` now decodes the quoted form.
+- **Server hardening**: no Host check (a rebound hostname could read a proprietary `/diff.txt`) and `/load` changed state on a GET (reachable from a link in the PR description). Host is loopback-only; `/load` is POST-only.
+
+Reviewed and found sound, with reasons recorded rather than asserted: the nonce fence (Scrub neutralizes the marker pre-fencing), column-0 marker forgery inside the diff fence (body lines always carry a +/-/space prefix), and the page's HTML escaping (every attacker-influenced string goes through `esc()` or `textContent`).
+
+**Accepted, not fixed** — `fold.go` keys SIMILAR folds on path and size, never content, while the page tells the reviewer to "verify the representative, skim the rest". A backdoor in a non-representative member is the residual risk. The page always renders the full diff and the claim is phrased as a question, but the framing invites a skim. Fixing it means a content-shape check before folding, or page copy that says name-and-size only. **This is a deliberate product conversation, not a defect** — raise it before this heuristic is trusted more.
+
+Observation from the acceptance runs: on the largest prompt (153KB) the `claude` CLI hit its 3-minute timeout on one attempt; the retry succeeded and, on an earlier run where both attempts timed out, the page degraded to "All changes" and still rendered. Both halves of the always-renders design were exercised in production, but the timeout is marginal at that prompt size.
+
 ## Self-review notes
 
 - **Handoff coverage**: W1 → Tasks 3/4/5 (prompt-side folding, all paths listed, greedy budget kept as backstop, <30KB acceptance observable via the stderr/harness size print); W2 → Tasks 2/8 (Claim question-form + Type, deletion three questions, nonfix rule, badges, collapsed defaults); W3 → Task 6 (semantic misc first, fallback bucket renamed and kept last — two buckets, not merged); W4 → Task 7 (exact schema incl. error lines, `runs.jsonl`); W6 → Task 10; W5 → Task 12 (optional, as the handoff marks it); acceptance checklist → Task 11 (incl. `go vet`).
