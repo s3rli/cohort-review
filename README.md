@@ -29,7 +29,7 @@ Fetches the diff, groups it into cohorts (~10–60s), prints a `http://127.0.0.1
 
 | Flag | Default | |
 |---|---|---|
-| `--port` | `0` (auto) | listen port |
+| `--port` | `7717` | listen port; `0` picks any free port |
 | `--no-open` | | don't open the browser |
 | `--model` | `sonnet` | claude model for grouping |
 | `--budget` | `204800` | max chars of diff hunks sent to the model |
@@ -50,7 +50,9 @@ Two ways to read the same diff, switched in the toolbar:
 | Viewed | per-file, remembered per PR |
 | switch PR | paste another URL to load it in place (re-groups, ~10–60s) |
 
-The current cohort and file are in the URL — `#paged/<cohort>/<file>`, or `#all/<cohort>` — so a link points at one file and back/forward step through both. Layout, theme and expand persist across loads.
+The current cohort and file are in the URL — `#paged/<cohort>/<file>`, or `#all/<cohort>` — so a link points at one file and back/forward step through both.
+
+Layout, theme, expand and Viewed marks are kept in `localStorage`, which browsers scope to the origin — and the origin includes the port. That is why `--port` has a fixed default: on a different port none of it carries over. If the default port is busy the server falls back to a free one and says so.
 
 ## Notes
 

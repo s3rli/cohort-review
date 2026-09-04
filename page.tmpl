@@ -6,7 +6,8 @@
 <title>{{.Title}} — cohort review</title>
 <!-- Restore the saved theme before first paint, so a light-mode user doesn't
      get a dark flash on every load. -->
-<script>{ const t = localStorage.getItem("theme"); if (t) document.documentElement.setAttribute("data-theme", t); }</script>
+<script>{ try { const t = localStorage.getItem("theme");
+  if (t) document.documentElement.setAttribute("data-theme", t); } catch (e) {} }</script>
 <link rel="stylesheet" href="/assets/ibm-plex.css">
 <link rel="stylesheet" href="/assets/diff2html.min.css">
 <link rel="stylesheet" href="/assets/github.min.css" id="hl-light" disabled>
@@ -468,6 +469,15 @@
   }
   const esc = s => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+  // Storage can throw outright, not just fail: a locked-down context or a full
+  // quota turns any access into an exception. "The page always renders" is a
+  // hard rule here, so every read and write goes through these — a lost
+  // preference must never cost the review.
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+  };
+
   let FMT = PAGE.format;
   let io = null;              // IntersectionObserver driving lazy cohort render
   // per-cohort: { subs, parsedSubs, present, hosted, drawn:Set(fi), rendered }
@@ -491,11 +501,36 @@
   // The Viewed checkbox is diff2html's own DOM, so any redraw — a layout flip
   // rebuilds the markup, since the format is baked into it — loses the mark.
   // Remember the paths instead, keyed by PR so two PRs don't share marks.
-  const VIEWED_KEY = `viewed:${PAGE.url || PAGE.title}`;
+  // Keyed by PR URL only. Falling back to the title would make two different
+  // PRs that happen to share a title share their marks, which is worse than not
+  // persisting at all — so with no URL the marks stay in memory for the session.
+  const VIEWED_KEY = PAGE.url ? `viewed:${PAGE.url}` : "";
+  const VIEWED_MAX = 40;                       // PRs kept before the oldest is dropped
   let viewed = new Set();
-  try { viewed = new Set(JSON.parse(localStorage.getItem(VIEWED_KEY) || "[]")); } catch (e) {}
+  if (VIEWED_KEY) {
+    try {
+      const rec = JSON.parse(store.get(VIEWED_KEY) || "{}");
+      if (Array.isArray(rec.paths)) viewed = new Set(rec.paths);
+    } catch (e) {}
+  }
   function saveViewed() {
-    try { localStorage.setItem(VIEWED_KEY, JSON.stringify([...viewed])); } catch (e) {}
+    if (!VIEWED_KEY) return;
+    store.set(VIEWED_KEY, JSON.stringify({ at: Date.now(), paths: [...viewed] }));
+    pruneViewed();
+  }
+  // Without this every PR ever reviewed keeps a key forever, and the quota is
+  // eventually spent on reviews nobody will reopen.
+  function pruneViewed() {
+    try {
+      const keys = Object.keys(localStorage).filter(k => k.startsWith("viewed:"));
+      if (keys.length <= VIEWED_MAX) return;
+      const aged = keys.map(k => {
+        let at = 0;
+        try { at = JSON.parse(localStorage.getItem(k) || "{}").at || 0; } catch (e) {}
+        return { k, at };
+      }).sort((a, b) => a.at - b.at);
+      aged.slice(0, keys.length - VIEWED_MAX).forEach(x => localStorage.removeItem(x.k));
+    } catch (e) {}
   }
   // bindViewed wires one freshly drawn card: record changes, and restore a
   // previous mark. click() rather than checked=true so diff2html's own handler
@@ -530,10 +565,13 @@
     document.getElementById("walk").textContent = PAGE.walkthrough;
     document.getElementById("intro").hidden = !PAGE.walkthrough;
     setupWalk();
-    setZen(localStorage.getItem("zen") === "1");
+    setZen(store.get("zen") === "1");
+    // Only http(s) reaches the href: anything else (javascript:, data:) would
+    // run in the page's own origin, next to the diff it is showing.
     const link = document.getElementById("pr-link");
-    link.href = PAGE.url;
-    link.hidden = !PAGE.url;
+    const href = /^https?:\/\//i.test(PAGE.url || "") ? PAGE.url : "";
+    link.href = href;
+    link.hidden = !href;
 
     const nav = document.getElementById("nav");
     const sections = document.getElementById("sections");
@@ -730,6 +768,9 @@
   // shows and takes its highlight from the selection.
   function applyMode() {
     const all = MODE === "all";
+    // Paged mode has nothing to settle onto; an inherited loop would keep
+    // writing scrollTop after the layout changed under it.
+    if (!all) { settleToken++; settling = false; }
     COHORTS.forEach((_, i) => { document.getElementById(`coh-${i}`).hidden = !all && i !== ACTIVE; });
     if (io) { io.disconnect(); io = null; }
     if (!all) {
@@ -813,9 +854,10 @@
   // the target stops moving, and get out of the way the moment the user scrolls.
   let settleToken = 0;
   let settling = false;
-  function scrollToCohort(ci) {
+  function scrollToCohort(ci, target) {
     const sc = scroller();
-    const el = document.getElementById(`coh-${ci}`);
+    const el = target || document.getElementById(`coh-${ci}`);
+    if (!el) return;
     el.scrollIntoView({ block: "start" });
     const mine = ++settleToken;
     // Spaced over ~1s rather than per-frame: each correction reveals more
@@ -825,7 +867,11 @@
     let tries = 25;
     settling = true;
     const step = () => {
-      if (mine !== settleToken || tries-- <= 0) { settling = false; return; }
+      // Superseded: a newer settle owns the flag now, so leave it alone.
+      // Clearing it here let the backfill move scrollTop underneath the live
+      // settle — the exact fight the flag exists to prevent.
+      if (mine !== settleToken) return;
+      if (tries-- <= 0) { settling = false; return; }
       const top = topWithin(el, sc);
       if (Math.abs(top) < 2) { settling = false; return; }
       sc.scrollTop += top;
@@ -884,7 +930,7 @@
     AF = af !== null ? af : (ci === ACTIVE ? AF : 0);
     MODE = mode;
     ACTIVE = ci;
-    localStorage.setItem("viewMode", MODE);
+    store.set("viewMode", MODE);
     applyMode();
     if (MODE === "all") {
       // Every cohort ABOVE the target has to be drawn before we scroll. Drawing
@@ -896,8 +942,14 @@
     } else {
       scroller().scrollTop = 0;
     }
+    // AF may have been clamped by applyMode (a hash naming file 999 of 3), so h
+    // is built after it. When we are not pushing, still correct a hash that no
+    // longer describes the page — otherwise reload and back/forward return to a
+    // file that was never shown.
     const h = MODE === "paged" ? `#paged/${ci + 1}/${AF + 1}` : `#all/${ci + 1}`;
-    if (push && location.hash !== h) location.hash = h;
+    if (location.hash === h) return;
+    if (push) location.hash = h;
+    else history.replaceState(null, "", h);
   }
 
   // Hash wins on load; otherwise the last mode used, like the theme.
@@ -910,7 +962,7 @@
       ci: Math.min(Math.max(+m[2] - 1, 0), COHORTS.length - 1),
       af: m[3] ? Math.max(+m[3] - 1, 0) : 0,
     };
-    return { mode: localStorage.getItem("viewMode") === "all" ? "all" : "paged", ci: 0, af: 0 };
+    return { mode: store.get("viewMode") === "all" ? "all" : "paged", ci: 0, af: 0 };
   }
   addEventListener("hashchange", () => {
     const t = parseHash();
@@ -928,10 +980,13 @@
     const af = cohortState[ci].present.indexOf(fi);
     if (af < 0) { go(ci); return; }
     if (MODE === "paged") { go(ci, MODE, true, af); return; }
+    // All mode: settle onto the FILE. Scrolling to it after go() had already
+    // started settling on the cohort header just lost the race — the settle
+    // loop dragged the header back to the top and the click looked ignored.
     go(ci);
     AF = af;
-    const el = document.getElementById(`f-${ci}-${fi}`) || document.getElementById(`coh-${ci}`);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    renderCohort(ci);
+    scrollToCohort(ci, document.getElementById(`f-${ci}-${fi}`));
     syncFileNav();
   }
   // setupWalk restores the last choice, and hides the toggle when the text is
@@ -943,13 +998,13 @@
     const overflows = w.scrollHeight > w.clientHeight + 1;
     btn.hidden = !overflows;
     if (!overflows) { w.classList.remove("clamped"); return; }
-    if (localStorage.getItem("walkOpen") === "1") setWalk(false);
+    if (store.get("walkOpen") === "1") setWalk(false);
     else setWalk(true);
   }
   function setWalk(clamped) {
     document.getElementById("walk").classList.toggle("clamped", clamped);
     document.getElementById("walk-toggle").textContent = clamped ? "more" : "less";
-    localStorage.setItem("walkOpen", clamped ? "0" : "1");
+    store.set("walkOpen", clamped ? "0" : "1");
   }
   function toggleWalk() {
     setWalk(!document.getElementById("walk").classList.contains("clamped"));
@@ -962,7 +1017,7 @@
     const btn = document.getElementById("zen-btn");
     btn.title = on ? "exit expand (esc)" : "expand (esc to exit)";
     btn.setAttribute("aria-label", on ? "restore the sidebar and header" : "expand the diff to the full window");
-    localStorage.setItem("zen", on ? "1" : "0");
+    store.set("zen", on ? "1" : "0");
   }
   function toggleZen() { setZen(!document.body.classList.contains("zen")); }
   addEventListener("keydown", e => {
@@ -972,7 +1027,7 @@
   function toggleTheme() {
     const light = effectiveDark();
     document.documentElement.setAttribute("data-theme", light ? "light" : "dark");
-    localStorage.setItem("theme", light ? "light" : "dark");
+    store.set("theme", light ? "light" : "dark");
     applyDark();
   }
 
@@ -1006,15 +1061,19 @@
 
   // Sidebar resize: drag the right edge; the chosen width persists.
   {
-    const saved = localStorage.getItem("sidebarW");
-    if (saved) document.documentElement.style.setProperty("--sidebar-w", saved);
+    // Stored values are untrusted: garbage makes the declaration invalid, and a
+    // huge number covers the whole pane with no way back.
+    const saved = parseInt(store.get("sidebarW"), 10);
+    if (saved >= 180 && saved <= 640) {
+      document.documentElement.style.setProperty("--sidebar-w", saved + "px");
+    }
     document.getElementById("rsz").addEventListener("mousedown", e => {
       e.preventDefault();
       document.body.classList.add("resizing");
       const move = ev => {
         const w = Math.min(Math.max(ev.clientX, 180), 640) + "px";
         document.documentElement.style.setProperty("--sidebar-w", w);
-        localStorage.setItem("sidebarW", w);
+        store.set("sidebarW", w);
       };
       const up = () => {
         document.body.classList.remove("resizing");
@@ -1026,13 +1085,28 @@
     });
   }
 
-  fetch("/diff.txt").then(r => r.text()).then(rawDiff => {
+  // The version pins this page to the PR it was rendered from; a 409 means
+  // another tab switched PRs underneath us, and the page must be re-fetched
+  // rather than rendered against a diff that does not match its cohorts.
+  fetch(`/diff.txt?v=${PAGE.version}`).then(r => {
+    if (r.status === 409) { location.reload(); return null; }
+    if (!r.ok) throw new Error(`diff fetch failed: ${r.status}`);
+    return r.text();
+  }).then(rawDiff => {
+    if (rawDiff === null) return;
     // Index per-file blocks by the path SplitUnifiedDiff would assign (b/ side,
     // falling back to a/ for deletions) so cohort file lists match exactly.
     // A path seen in two segments is appended and marked unsplittable — its
     // concatenated block can't be hunk-indexed, matching the server's
     // bare-only rule for duplicate paths.
-    rawDiff.split(/(?=^diff --git )/m).forEach(b => {
+    // Must match SplitUnifiedDiff's rule byte for byte: git headers when the
+    // diff has any, otherwise each "--- " old-file header starts a segment.
+    // Splitting only on "diff --git" swallowed every file of a header-less diff
+    // into the first block, so the rest had no fileBlocks entry and silently
+    // vanished from the page — breaking the exactly-once invariant.
+    const useGitHeaders = /^diff --git /m.test(rawDiff);
+    const blocks = rawDiff.split(useGitHeaders ? /(?=^diff --git )/m : /(?=^--- )/m);
+    blocks.forEach(b => {
       const m = b.match(/^\+\+\+ b\/(.+)$/m) || b.match(/^--- a\/(.+)$/m);
       if (!m) return;
       const fb = fileBlocks[m[1]];

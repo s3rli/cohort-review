@@ -17,9 +17,15 @@ func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
+// defaultPort is fixed rather than ephemeral because the page keeps its
+// settings — theme, layout, sidebar width, and which files are marked Viewed —
+// in localStorage, which is scoped to the origin, and the origin includes the
+// port. A random port every run silently discarded all of it.
+const defaultPort = 7717
+
 func run(args []string) int {
 	fs := flag.NewFlagSet("cohort-review", flag.ExitOnError)
-	port := fs.Int("port", 0, "listen port (default 0 = auto)")
+	port := fs.Int("port", defaultPort, "listen port (0 = any free port)")
 	noOpen := fs.Bool("no-open", false, "don't open the browser")
 	model := fs.String("model", "sonnet", "claude model for grouping")
 	budget := fs.Int("budget", defaultBudget, "max chars of diff hunks sent to the model")
